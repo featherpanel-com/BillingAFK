@@ -93,6 +93,17 @@ return function (RouteCollection $routes): void {
         ['GET']
     );
 
+    // Work endpoint - called periodically to award credits
+    App::getInstance(true)->registerAuthRoute(
+        $routes,
+        'billingafk-user-work',
+        '/api/user/billingafk/work',
+        function (Request $request) {
+            return (new UserController())->work($request);
+        },
+        ['POST']
+    );
+
     // Admin Routes
     // Get settings
     App::getInstance(true)->registerAdminRoute(

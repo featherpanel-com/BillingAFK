@@ -32,7 +32,6 @@ namespace App\Addons\billingafk\Controllers\User;
 
 use App\Helpers\ApiResponse;
 use OpenApi\Attributes as OA;
-use App\Addons\billingafk\Chat\AFKSession;
 use App\Addons\billingafk\Chat\AFKUserStats;
 use App\Addons\billingafk\Helpers\AFKHelper;
 use App\Addons\billingafk\Chat\AFKDailyUsage;
@@ -65,83 +64,16 @@ class BillingAFKController
             return ApiResponse::error('AFK rewards are currently disabled', 'AFK_DISABLED', 403);
         }
 
-        $session = AFKSession::getActiveSession($user['id']);
         $settings = AFKHelper::getSettings();
         $javascriptInjection = $settings['javascript_injection'] ?? '';
 
         // Get user's current credits balance
         $userCredits = CreditsHelper::getUserCredits($user['id']);
 
-        // Get daily usage and limits
-        $dailyUsage = AFKDailyUsage::getTodayUsage($user['id']);
-        $dailyUsageData = [
-            'credits_earned_today' => $dailyUsage ? (int) $dailyUsage['credits_earned'] : 0,
-            'sessions_today' => $dailyUsage ? (int) $dailyUsage['sessions_count'] : 0,
-            'time_seconds_today' => $dailyUsage ? (int) $dailyUsage['time_seconds'] : 0,
-        ];
-
-        // Get daily limits
-        $dailyLimits = [
-            'max_credits_per_day' => $settings['max_credits_per_day'],
-            'max_sessions_per_day' => $settings['max_sessions_per_day'],
-            'max_time_per_day_seconds' => $settings['max_time_per_day_seconds'],
-        ];
-
-        if (!$session) {
-            return ApiResponse::success([
-                'is_afk' => false,
-                'started_at' => null,
-                'credits_earned' => 0,
-                'credits_formatted' => CurrencyHelper::formatAmount(0),
-                'time_elapsed' => 0,
-                'next_reward_in' => null,
-                'javascript_injection' => $javascriptInjection,
-                'user_credits' => $userCredits,
-                'user_credits_formatted' => CurrencyHelper::formatAmount($userCredits),
-                'daily_usage' => $dailyUsageData,
-                'daily_limits' => $dailyLimits,
-            ], 'Status retrieved successfully', 200);
-        }
-
-        // Calculate current time elapsed
-        $startedAt = new \DateTime($session['started_at']);
-        $now = new \DateTime();
-        $timeElapsed = (int) ($now->getTimestamp() - $startedAt->getTimestamp());
-
-        // Apply max session duration limit
-        if ($settings['max_session_duration_seconds'] !== null && $timeElapsed > $settings['max_session_duration_seconds']) {
-            $timeElapsed = $settings['max_session_duration_seconds'];
-        }
-
-        // Calculate credits earned (only unclaimed credits)
-        $totalCreditsEarned = AFKHelper::calculateCredits($timeElapsed);
-        $alreadyClaimed = AFKSession::getClaimedCredits((int) $session['id']);
-        $creditsEarned = max(0, $totalCreditsEarned - $alreadyClaimed);
-
-        // Calculate next reward time based on reward interval
-        $nextRewardIn = null;
-        if ($settings['reward_interval_seconds'] > 0) {
-            $lastClaimTime = AFKSession::getLastClaimTime((int) $session['id']);
-            $interval = $settings['reward_interval_seconds'];
-
-            if ($lastClaimTime !== null) {
-                // Calculate time since last claim
-                $timeSinceLastClaim = (int) ($now->getTimestamp() - $lastClaimTime->getTimestamp());
-                // Calculate when next reward will be available
-                $nextRewardIn = max(0, $interval - ($timeSinceLastClaim % $interval));
-            } else {
-                // No claim yet, calculate from session start
-                $nextRewardIn = max(0, $interval - ($timeElapsed % $interval));
-            }
-        }
-
-        // Update session if credits changed
-        if ($totalCreditsEarned !== (int) $session['credits_earned'] || $timeElapsed !== (int) $session['time_elapsed']) {
-            AFKSession::updateSession((int) $session['id'], $totalCreditsEarned, $timeElapsed);
-        }
-
-        // Get user's current credits balance
-        $userCredits = CreditsHelper::getUserCredits($user['id']);
+        // Get user AFK stats (like MythicalDash)
+        $stats = AFKUserStats::getOrCreate($user['id']);
+        $minutesAfk = $stats ? (int) ($stats['minutes_afk'] ?? 0) : 0;
+        $lastSeenAfk = $stats ? (int) ($stats['last_seen_afk'] ?? 0) : 0;
 
         // Get daily usage and limits
         $dailyUsage = AFKDailyUsage::getTodayUsage($user['id']);
@@ -158,19 +90,22 @@ class BillingAFKController
             'max_time_per_day_seconds' => $settings['max_time_per_day_seconds'],
         ];
 
-        // Get JavaScript injection code from settings
-        $javascriptInjection = $settings['javascript_injection'] ?? '';
+        // Get credit configuration for frontend
+        $creditsPerMinute = isset($settings['credits_per_minute']) && $settings['credits_per_minute'] > 0
+            ? (float) $settings['credits_per_minute']
+            : null;
+        $minutesPerCredit = isset($settings['minutes_per_credit']) && $settings['minutes_per_credit'] > 0
+            ? (float) $settings['minutes_per_credit']
+            : null;
 
         return ApiResponse::success([
-            'is_afk' => true,
-            'started_at' => $session['started_at'],
-            'credits_earned' => $creditsEarned,
-            'credits_formatted' => CurrencyHelper::formatAmount($creditsEarned),
-            'time_elapsed' => max(0, $timeElapsed), // Ensure non-negative
-            'next_reward_in' => $nextRewardIn,
+            'minutes_afk' => $minutesAfk,
+            'last_seen_afk' => $lastSeenAfk,
             'javascript_injection' => $javascriptInjection,
             'user_credits' => $userCredits,
             'user_credits_formatted' => CurrencyHelper::formatAmount($userCredits),
+            'credits_per_minute' => $creditsPerMinute,
+            'minutes_per_credit' => $minutesPerCredit,
             'daily_usage' => $dailyUsageData,
             'daily_limits' => $dailyLimits,
         ], 'Status retrieved successfully', 200);
@@ -189,37 +124,8 @@ class BillingAFKController
     )]
     public function startAFK(Request $request): Response
     {
-        $user = $request->attributes->get('user') ?? $request->get('user');
-        if (!$user || !isset($user['id'])) {
-            return ApiResponse::error('User not authenticated', 'UNAUTHORIZED', 401);
-        }
-
-        if (!AFKHelper::isEnabled()) {
-            return ApiResponse::error('AFK rewards are currently disabled', 'AFK_DISABLED', 403);
-        }
-
-        // Check daily limits before starting session
-        $settings = AFKHelper::getSettings();
-        $limitCheck = AFKDailyUsage::checkDailyLimits($user['id'], $settings);
-        if (!$limitCheck['allowed']) {
-            return ApiResponse::error($limitCheck['message'], $limitCheck['reason'], 429);
-        }
-
-        // Check if already has active session
-        $existing = AFKSession::getActiveSession($user['id']);
-        if ($existing !== null) {
-            return ApiResponse::error('AFK session already active', 'SESSION_ALREADY_ACTIVE', 400);
-        }
-
-        $session = AFKSession::startSession($user['id']);
-        if (!$session) {
-            return ApiResponse::error('Failed to start AFK session', 'START_FAILED', 500);
-        }
-
-        return ApiResponse::success([
-            'session_id' => $session['id'],
-            'started_at' => $session['started_at'],
-        ], 'AFK session started successfully', 200);
+        // No-op: Sessions are not used, just return success (like MythicalDash)
+        return ApiResponse::success([], 'AFK mode can be started from frontend', 200);
     }
 
     #[OA\Post(
@@ -235,24 +141,8 @@ class BillingAFKController
     )]
     public function stopAFK(Request $request): Response
     {
-        $user = $request->attributes->get('user') ?? $request->get('user');
-        if (!$user || !isset($user['id'])) {
-            return ApiResponse::error('User not authenticated', 'UNAUTHORIZED', 401);
-        }
-
-        $session = AFKSession::getActiveSession($user['id']);
-        if (!$session) {
-            return ApiResponse::error('No active AFK session found', 'NO_ACTIVE_SESSION', 404);
-        }
-
-        $stopped = AFKSession::stopSession($user['id']);
-        if (!$stopped) {
-            return ApiResponse::error('Failed to stop AFK session', 'STOP_FAILED', 500);
-        }
-
-        return ApiResponse::success([
-            'session_id' => $session['id'],
-        ], 'AFK session stopped successfully', 200);
+        // No-op: Sessions are not used, just return success (like MythicalDash)
+        return ApiResponse::success([], 'AFK mode can be stopped from frontend', 200);
     }
 
     #[OA\Post(
@@ -268,130 +158,160 @@ class BillingAFKController
     )]
     public function claimRewards(Request $request): Response
     {
+        // No-op: Credits are awarded automatically via work endpoint (like MythicalDash)
+        return ApiResponse::success([], 'Credits are awarded automatically via work endpoint', 200);
+    }
+
+    #[OA\Post(
+        path: '/api/user/billingafk/work',
+        summary: 'Update AFK work (periodic call)',
+        description: 'Called every minute to increment AFK time and award credits based on config (like MythicalDash)',
+        tags: ['User - Billing AFK'],
+        responses: [
+            new OA\Response(response: 200, description: 'AFK work updated successfully'),
+            new OA\Response(response: 401, description: 'Unauthorized'),
+        ]
+    )]
+    public function work(Request $request): Response
+    {
         $user = $request->attributes->get('user') ?? $request->get('user');
         if (!$user || !isset($user['id'])) {
             return ApiResponse::error('User not authenticated', 'UNAUTHORIZED', 401);
         }
 
-        $session = AFKSession::getActiveSession($user['id']);
-        if (!$session) {
-            return ApiResponse::error('No active AFK session found', 'NO_ACTIVE_SESSION', 404);
+        if (!AFKHelper::isEnabled()) {
+            return ApiResponse::error('AFK rewards are currently disabled', 'AFK_DISABLED', 403);
         }
 
-        // Recalculate credits before claiming
-        $startedAt = new \DateTime($session['started_at']);
-        $now = new \DateTime();
-        $timeElapsed = (int) ($now->getTimestamp() - $startedAt->getTimestamp());
+        // Get settings
         $settings = AFKHelper::getSettings();
 
-        if ($settings['max_session_duration_seconds'] !== null && $timeElapsed > $settings['max_session_duration_seconds']) {
-            $timeElapsed = $settings['max_session_duration_seconds'];
+        // Abuse prevention: Increment AFK time with rate limiting (atomic operation)
+        // This prevents spam by checking and updating in a single transaction
+        // Must wait at least 60 seconds (1 minute) between calls
+        $updatedStats = AFKUserStats::incrementAFKTime($user['id'], 60);
+        if (!$updatedStats) {
+            return ApiResponse::error(
+                'Please wait at least 60 seconds (1 minute) between work calls. This prevents abuse.',
+                'RATE_LIMIT_EXCEEDED',
+                429
+            );
         }
 
-        // Calculate total credits earned so far
-        $totalCreditsEarned = AFKHelper::calculateCredits($timeElapsed);
+        // Get current values from updated stats
+        $currentMinutesAfk = (int) ($updatedStats['minutes_afk'] ?? 0);
+        $newMinutesAfk = $currentMinutesAfk; // Already incremented
+        $userCredits = CreditsHelper::getUserCredits($user['id']);
 
-        // Get already claimed credits
-        $alreadyClaimed = AFKSession::getClaimedCredits((int) $session['id']);
-        $availableCredits = $totalCreditsEarned - $alreadyClaimed;
+        // Calculate credits to award based on configuration
+        $creditsToAward = 0;
 
-        if ($availableCredits <= 0) {
-            return ApiResponse::error('No credits available to claim. Please wait for more time to accumulate.', 'NO_CREDITS', 400);
-        }
+        // Priority 1: Use credits_per_minute if set and > 0
+        if (isset($settings['credits_per_minute']) && $settings['credits_per_minute'] > 0) {
+            // Award credits based on credits_per_minute
+            // For fractional credits (e.g., 0.5), we need to track accumulation
+            // Simple approach: award floor value each minute, track remainder
+            $creditsPerMinute = (float) $settings['credits_per_minute'];
 
-        // Check daily limits before claiming
-        $limitCheck = AFKDailyUsage::checkDailyLimits($user['id'], $settings);
-        if (!$limitCheck['allowed']) {
-            return ApiResponse::error($limitCheck['message'], $limitCheck['reason'], 429);
-        }
-
-        // Calculate how many credits can be claimed based on time since last claim (or session start)
-        $lastClaimTime = AFKSession::getLastClaimTime((int) $session['id']);
-        $timeForNewCredits = $lastClaimTime !== null
-            ? (int) ($now->getTimestamp() - $lastClaimTime->getTimestamp())
-            : $timeElapsed;
-
-        // Only allow claiming credits earned since last claim
-        $creditsSinceLastClaim = AFKHelper::calculateCredits($timeForNewCredits);
-
-        // Cap at available credits
-        $creditsToClaim = min($creditsSinceLastClaim, $availableCredits);
-
-        // Check if claiming would exceed daily credits limit
-        $usage = AFKDailyUsage::getTodayUsage($user['id']);
-        $creditsToday = $usage ? (int) $usage['credits_earned'] : 0;
-        if ($settings['max_credits_per_day'] !== null) {
-            $remainingDailyCredits = $settings['max_credits_per_day'] - $creditsToday;
-            if ($remainingDailyCredits <= 0) {
-                return ApiResponse::error(
-                    sprintf('Daily credits limit reached (%d/%d). Please try again tomorrow.', $creditsToday, $settings['max_credits_per_day']),
-                    'DAILY_CREDITS_LIMIT',
-                    429
-                );
-            }
-            // Cap credits to claim at remaining daily limit
-            $creditsToClaim = min($creditsToClaim, $remainingDailyCredits);
-        }
-
-        if ($creditsToClaim <= 0) {
-            return ApiResponse::error('No credits available to claim. Please wait for more time to accumulate.', 'NO_CREDITS', 400);
-        }
-
-        // Abuse prevention: Check if enough time has passed since last claim
-        $lastClaimTime = AFKSession::getLastClaimTime((int) $session['id']);
-        if ($lastClaimTime !== null) {
-            $timeSinceLastClaim = (int) ($now->getTimestamp() - $lastClaimTime->getTimestamp());
-            $minTimeBetweenClaims = $settings['reward_interval_seconds'] ?? 60;
-
-            if ($timeSinceLastClaim < $minTimeBetweenClaims) {
-                $remainingTime = $minTimeBetweenClaims - $timeSinceLastClaim;
-
-                return ApiResponse::error(
-                    sprintf('Please wait %d more seconds before claiming again. This prevents abuse.', $remainingTime),
-                    'CLAIM_TOO_SOON',
-                    429
-                );
+            // Get accumulated fractional credits from stats (we'll store in a separate field or calculate)
+            // For now, simple approach: award credits when accumulated value >= 1
+            // We'll use a simple calculation: every N minutes, award based on credits_per_minute
+            if ($creditsPerMinute >= 1.0) {
+                // Award full credits each minute
+                $creditsToAward = (int) floor($creditsPerMinute);
+            } else {
+                // Fractional credits: award 1 credit every (1/credits_per_minute) minutes
+                $minutesPerCredit = (int) ceil(1.0 / $creditsPerMinute);
+                $creditsToAward = ($newMinutesAfk % $minutesPerCredit === 0) ? 1 : 0;
             }
         }
-
-        // Calculate how many credits can be claimed based on time since last claim (or session start)
-        $timeForNewCredits = $lastClaimTime !== null
-            ? (int) ($now->getTimestamp() - $lastClaimTime->getTimestamp())
-            : $timeElapsed;
-
-        // Only allow claiming credits earned since last claim
-        $creditsSinceLastClaim = AFKHelper::calculateCredits($timeForNewCredits);
-
-        // Cap at available credits
-        $creditsToClaim = min($creditsSinceLastClaim, $availableCredits);
-
-        if ($creditsToClaim <= 0) {
-            return ApiResponse::error('No credits available to claim. Please wait for more time to accumulate.', 'NO_CREDITS', 400);
+        // Priority 2: Use minutes_per_credit if set
+        elseif (isset($settings['minutes_per_credit']) && $settings['minutes_per_credit'] > 0) {
+            // Only award credits when minutes_afk is divisible by minutes_per_credit
+            $minutesPerCredit = (float) $settings['minutes_per_credit'];
+            if ($minutesPerCredit >= 1.0) {
+                $creditsToAward = ($newMinutesAfk % (int) $minutesPerCredit === 0) ? 1 : 0;
+            } else {
+                // If less than 1 minute per credit, award multiple credits
+                $creditsPerMinute = 1.0 / $minutesPerCredit;
+                $creditsToAward = (int) floor($creditsPerMinute);
+            }
+        }
+        // Default: 1 credit per minute
+        else {
+            $creditsToAward = 1;
         }
 
-        // Update session with current totals
-        AFKSession::updateSession((int) $session['id'], $totalCreditsEarned, $timeElapsed);
-
-        // Claim rewards (with abuse prevention)
-        $claimResult = AFKSession::claimRewards($user['id'], (int) $session['id'], $creditsToClaim);
-        if (!$claimResult) {
-            return ApiResponse::error('Failed to claim rewards', 'CLAIM_FAILED', 500);
+        // Check daily limits before awarding credits
+        if ($creditsToAward > 0) {
+            $limitCheck = AFKDailyUsage::checkDailyLimits($user['id'], $settings);
+            if (!$limitCheck['allowed']) {
+                // Don't award credits if daily limit reached, but still update time
+                $creditsToAward = 0;
+            } else {
+                // Check if awarding would exceed daily credits limit
+                $usage = AFKDailyUsage::getTodayUsage($user['id']);
+                $creditsToday = $usage ? (int) $usage['credits_earned'] : 0;
+                if ($settings['max_credits_per_day'] !== null) {
+                    $remainingDailyCredits = $settings['max_credits_per_day'] - $creditsToday;
+                    if ($remainingDailyCredits <= 0) {
+                        $creditsToAward = 0;
+                    } else {
+                        $creditsToAward = min($creditsToAward, $remainingDailyCredits);
+                    }
+                }
+            }
         }
 
-        // Add credits to user account using billingcore
-        $added = CreditsHelper::addUserCredits($user['id'], $claimResult['credits_earned']);
-        if (!$added) {
-            return ApiResponse::error('Failed to add credits to account', 'CREDITS_ADD_FAILED', 500);
-        }
+        // Add credits atomically if any to award
+        $newTotalCredits = $userCredits;
+        if ($creditsToAward > 0) {
+            $added = CreditsHelper::addUserCredits($user['id'], $creditsToAward);
+            if ($added) {
+                $newTotalCredits = $userCredits + $creditsToAward;
 
-        // Update user stats
-        AFKUserStats::updateStats($user['id'], $timeElapsed, $claimResult['credits_earned']);
+                // Update daily usage
+                AFKDailyUsage::updateUsage($user['id'], $creditsToAward, 60, false);
+
+                // Update total credits earned in stats
+                $pdo = \App\Chat\Database::getPdoConnection();
+                try {
+                    $stmt = $pdo->prepare(
+                        'UPDATE featherpanel_billingafk_user_stats SET 
+                            total_credits_earned = total_credits_earned + :credits,
+                            total_time_seconds = total_time_seconds + 60
+                        WHERE user_id = :user_id'
+                    );
+                    $stmt->execute([
+                        'user_id' => $user['id'],
+                        'credits' => $creditsToAward,
+                    ]);
+                } catch (\PDOException $e) {
+                    \App\App::getInstance(true)->getLogger()->error('Failed to update AFK stats: ' . $e->getMessage());
+                }
+            } else {
+                \App\App::getInstance(true)->getLogger()->error('Failed to add AFK credits for user: ' . $user['id']);
+            }
+        } else {
+            // Still update total time even if no credits awarded
+            $pdo = \App\Chat\Database::getPdoConnection();
+            try {
+                $stmt = $pdo->prepare(
+                    'UPDATE featherpanel_billingafk_user_stats SET 
+                        total_time_seconds = total_time_seconds + 60
+                    WHERE user_id = :user_id'
+                );
+                $stmt->execute(['user_id' => $user['id']]);
+            } catch (\PDOException $e) {
+                \App\App::getInstance(true)->getLogger()->error('Failed to update AFK time: ' . $e->getMessage());
+            }
+        }
 
         return ApiResponse::success([
-            'credits_earned' => $claimResult['credits_earned'],
-            'credits_formatted' => CurrencyHelper::formatAmount($claimResult['credits_earned']),
-            'message' => 'Rewards claimed successfully',
-        ], 'Rewards claimed successfully', 200);
+            'credits_awarded' => $creditsToAward,
+            'total_credits' => $newTotalCredits,
+            'total_afk_time' => $newMinutesAfk,
+        ], 'AFK stats updated', 200);
     }
 
     #[OA\Get(

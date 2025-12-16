@@ -8,30 +8,27 @@ import {
   Clock,
   Play,
   Pause,
-  CheckCircle2,
-  AlertCircle,
   Wallet,
   Loader2,
   Timer,
+  AlertCircle,
 } from "lucide-vue-next";
 import { useAFKAPI } from "@/composables/useAFKAPI";
 import { useToast } from "vue-toastification";
+import axios from "axios";
 
 const toast = useToast();
-const { loading, error, getStatus, startAFK, stopAFK, claimRewards } =
-  useAFKAPI();
+const { loading, error, getStatus } = useAFKAPI();
 
-// AFK State
+// AFK State (like MythicalDash)
 const afkStatus = ref<{
-  is_afk: boolean;
-  started_at: string | null;
-  credits_earned: number;
-  credits_formatted: string;
-  time_elapsed: number;
-  next_reward_in: number | null;
+  minutes_afk?: number;
+  last_seen_afk?: number;
   javascript_injection?: string;
   user_credits?: number;
   user_credits_formatted?: string;
+  credits_per_minute?: number | null;
+  minutes_per_credit?: number | null;
   daily_usage?: {
     credits_earned_today: number;
     sessions_today: number;
@@ -44,77 +41,111 @@ const afkStatus = ref<{
   };
 } | null>(null);
 
-const isAFKActive = ref(false);
-const timerInterval = ref<number | null>(null);
-const elapsedTime = ref(0);
-const nextRewardIn = ref<number | null>(null);
-const sessionStartTime = ref<number | null>(null);
+const isActive = ref(false);
+const seconds = ref(0);
+const totalCoins = ref(0);
+const sessionCoins = ref(0);
+const currentSessionTime = ref(0); // in minutes
+const totalAFKTime = ref(0); // in minutes
+let timerInterval: number | null = null;
+
+// Calculate expected credits per minute from settings (for display only)
+const expectedCreditsPerMinute = computed(() => {
+  if (!afkStatus.value) return 0;
+
+  // Priority 1: Use credits_per_minute if set
+  if (
+    afkStatus.value.credits_per_minute &&
+    afkStatus.value.credits_per_minute > 0
+  ) {
+    return afkStatus.value.credits_per_minute;
+  }
+
+  // Priority 2: Use minutes_per_credit if set
+  if (
+    afkStatus.value.minutes_per_credit &&
+    afkStatus.value.minutes_per_credit > 0
+  ) {
+    return 1.0 / afkStatus.value.minutes_per_credit;
+  }
+
+  // Default: 1 credit per minute
+  return 1;
+});
 
 // Format time helper
-const formatTime = (seconds: number): string => {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${secs}s`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${secs}s`;
-  }
-  return `${secs}s`;
+const formatTime = (
+  totalSeconds: number
+): { hours: string; minutes: string; seconds: string } => {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  return {
+    hours: hours.toString().padStart(2, "0"),
+    minutes: minutes.toString().padStart(2, "0"),
+    seconds: secs.toString().padStart(2, "0"),
+  };
 };
 
-// Computed properties
-const canClaimRewards = computed(() => {
-  return (
-    afkStatus.value &&
-    afkStatus.value.is_afk &&
-    afkStatus.value.credits_earned > 0
-  );
-});
+// Format time into readable string (e.g. "12h 34m")
+const formatTimeString = (totalMinutes: number): string => {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
 
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m`;
+};
+
+// Computed for display
 const displayTime = computed(() => {
-  return formatTime(elapsedTime.value);
+  const time = formatTime(seconds.value);
+  return {
+    hours: time.hours,
+    minutes: time.minutes,
+    seconds: time.seconds,
+  };
 });
 
-const displayNextReward = computed(() => {
-  if (nextRewardIn.value === null) return "N/A";
-  return formatTime(nextRewardIn.value);
-});
+// Check if user is actively on the page
+const isUserActive = (): boolean => {
+  return document.visibilityState === "visible";
+};
+
+// Handle visibility change
+const handleVisibilityChange = () => {
+  if (!isUserActive() && isActive.value) {
+    // User switched to another tab or minimized the window
+    stopTimer();
+    toast.warning(
+      "AFK session paused. Please keep this tab active to continue earning rewards."
+    );
+  }
+};
 
 // Load AFK status
 const loadStatus = async () => {
   try {
     const status = await getStatus();
     afkStatus.value = status;
-    isAFKActive.value = status.is_afk;
 
-    // Set session start time from server if available
-    if (status.started_at) {
-      sessionStartTime.value = new Date(status.started_at).getTime();
-      // Calculate elapsed time from session start
-      const serverElapsed = Math.max(0, status.time_elapsed || 0);
-      elapsedTime.value = serverElapsed;
-    } else {
-      elapsedTime.value = 0;
-      sessionStartTime.value = null;
+    // Update user credits
+    if (status.user_credits !== undefined) {
+      totalCoins.value = status.user_credits;
     }
 
-    // Set next reward from server
-    if (status.next_reward_in !== null && status.next_reward_in >= 0) {
-      nextRewardIn.value = status.next_reward_in;
-    } else {
-      nextRewardIn.value = null;
+    // Update total AFK time
+    if (status.minutes_afk !== undefined) {
+      totalAFKTime.value = status.minutes_afk;
     }
 
     // Inject JavaScript if provided
     if (status.javascript_injection && status.javascript_injection.trim()) {
       try {
-        // Create a script element and execute the code
         const script = document.createElement("script");
         script.textContent = status.javascript_injection;
         document.head.appendChild(script);
-        // Remove after execution to keep DOM clean
         setTimeout(() => {
           if (script.parentNode) {
             script.parentNode.removeChild(script);
@@ -124,17 +155,6 @@ const loadStatus = async () => {
         console.error("Failed to inject JavaScript:", err);
       }
     }
-
-    // Start/restart timer if AFK is active
-    if (status.is_afk) {
-      if (timerInterval.value) {
-        stopTimer();
-      }
-      startTimer();
-    } else if (!status.is_afk && timerInterval.value) {
-      stopTimer();
-      sessionStartTime.value = null;
-    }
   } catch (err) {
     toast.error(
       err instanceof Error ? err.message : "Failed to load AFK status"
@@ -142,88 +162,113 @@ const loadStatus = async () => {
   }
 };
 
-// Start AFK
-const handleStartAFK = async () => {
-  try {
-    await startAFK();
-    toast.success("AFK mode started! You'll earn credits while away.");
-    await loadStatus();
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : "Failed to start AFK");
+// Toggle AFK mode (like MythicalDash - no backend session, just local state)
+const toggleAFK = () => {
+  if (isActive.value) {
+    stopTimer();
+  } else {
+    startTimer();
   }
 };
 
-// Stop AFK
-const handleStopAFK = async () => {
-  try {
-    await stopAFK();
-    toast.success("AFK mode stopped.");
-    await loadStatus();
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : "Failed to stop AFK");
-  }
-};
-
-// Claim rewards
-const handleClaimRewards = async () => {
-  try {
-    const result = await claimRewards();
-    toast.success(`Successfully claimed ${result.credits_formatted} credits!`);
-    await loadStatus();
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : "Failed to claim rewards");
-  }
-};
-
-// Timer functions
+// Start the timer
 const startTimer = () => {
-  if (timerInterval.value) {
+  if (!isUserActive()) {
+    toast.warning("Please keep this tab active to start earning AFK rewards.");
+    return;
+  }
+
+  if (timerInterval) {
     stopTimer();
   }
 
-  // If we have a session start time from the server, use it
-  if (afkStatus.value?.started_at) {
-    const startedAt = new Date(afkStatus.value.started_at).getTime();
-    sessionStartTime.value = startedAt;
-  } else {
-    // Otherwise use current time
-    sessionStartTime.value = Date.now();
-  }
+  isActive.value = true;
 
-  timerInterval.value = window.setInterval(() => {
-    if (!sessionStartTime.value) return;
-
-    // Calculate elapsed time from session start
-    const currentElapsed = Math.floor(
-      (Date.now() - sessionStartTime.value) / 1000
-    );
-    elapsedTime.value = Math.max(0, currentElapsed);
-
-    // Update next reward countdown based on reward interval
-    if (
-      afkStatus.value &&
-      afkStatus.value.next_reward_in !== null &&
-      afkStatus.value.next_reward_in > 0
-    ) {
-      // Calculate next reward based on elapsed time and interval
-      const interval = afkStatus.value.next_reward_in || 60;
-      const timeSinceLastReward = elapsedTime.value % interval;
-      nextRewardIn.value = Math.max(0, interval - timeSinceLastReward);
-    } else {
-      nextRewardIn.value = null;
+  // Start the main timer
+  timerInterval = window.setInterval(() => {
+    if (!isUserActive()) {
+      stopTimer();
+      return;
     }
 
-    // Refresh status every 30 seconds to sync with server
-    if (currentElapsed > 0 && currentElapsed % 30 === 0) {
+    seconds.value++;
+
+    // Every minute, update AFK stats (like MythicalDash)
+    if (seconds.value % 60 === 0) {
+      updateAFKStats();
+    }
+
+    // Refetch credits every 30 seconds to show real-time updates
+    if (seconds.value % 30 === 0 && seconds.value > 0) {
       loadStatus();
     }
   }, 1000);
+
+  // Add visibility change listener
+  document.addEventListener("visibilitychange", handleVisibilityChange);
 };
 
+// Update AFK stats - called every minute (like MythicalDash)
+const updateAFKStats = async () => {
+  // Increase AFK time by 1 minute
+  currentSessionTime.value += 1;
+  totalAFKTime.value += 1;
+
+  // Don't calculate credits on frontend - let server handle it
+  // Just send minutes_afk: 1 and server will calculate credits based on settings
+
+  // Make an API call to update the server (like MythicalDash)
+  try {
+    const response = await axios.post("/api/user/billingafk/work", {
+      minutes_afk: 1,
+    });
+
+    const data = response.data;
+
+    // Check for successful API response
+    if (response.status === 200 && data.success) {
+      // Update total credits from server response (server is source of truth)
+      if (data.data?.total_credits !== undefined) {
+        totalCoins.value = data.data.total_credits;
+      }
+      if (data.data?.total_afk_time !== undefined) {
+        totalAFKTime.value = data.data.total_afk_time;
+      }
+
+      // Update session credits based on what server actually awarded
+      if (
+        data.data?.credits_awarded !== undefined &&
+        data.data.credits_awarded > 0
+      ) {
+        sessionCoins.value += data.data.credits_awarded;
+      }
+
+      // Refresh status to get updated user credits and daily limits
+      await loadStatus();
+    } else {
+      console.warn("API responded with non-success status:", data);
+    }
+  } catch (err) {
+    console.error("Failed to update AFK stats:", err);
+    if (axios.isAxiosError(err)) {
+      const errorMsg = err.response?.data?.message || err.message;
+      // Don't show error for rate limiting - it's expected
+      if (!errorMsg.includes("RATE_LIMIT") && !errorMsg.includes("wait")) {
+        toast.error(`Failed to update AFK stats: ${errorMsg}`);
+      }
+    }
+  }
+};
+
+// Stop the timer
 const stopTimer = () => {
-  if (timerInterval.value) {
-    clearInterval(timerInterval.value);
-    timerInterval.value = null;
+  isActive.value = false;
+  if (timerInterval !== null) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+
+    // Remove visibility change listener
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
   }
 };
 
@@ -245,7 +290,7 @@ onUnmounted(() => {
           <h1 class="text-lg font-semibold">AFK Rewards</h1>
         </div>
         <p class="text-xs text-muted-foreground ml-5.5">
-          Earn credits by staying AFK. Start the timer and claim your rewards!
+          Earn credits by staying AFK. Start the timer and keep this tab active!
         </p>
       </div>
 
@@ -329,10 +374,20 @@ onUnmounted(() => {
                 Time Today
               </div>
               <div class="text-lg font-semibold">
-                {{ formatTime(afkStatus.daily_usage?.time_seconds_today || 0) }}
+                {{
+                  formatTimeString(
+                    Math.floor(
+                      (afkStatus.daily_usage?.time_seconds_today || 0) / 60
+                    )
+                  )
+                }}
                 /
                 {{
-                  formatTime(afkStatus.daily_limits.max_time_per_day_seconds)
+                  formatTimeString(
+                    Math.floor(
+                      afkStatus.daily_limits.max_time_per_day_seconds / 60
+                    )
+                  )
                 }}
               </div>
             </div>
@@ -340,7 +395,7 @@ onUnmounted(() => {
         </div>
       </Card>
 
-      <!-- Status Card -->
+      <!-- Main AFK Timer Card -->
       <Card class="mb-4 border-primary/20">
         <div class="p-6">
           <div class="flex items-center gap-3 mb-4">
@@ -348,9 +403,9 @@ onUnmounted(() => {
               <Clock class="h-5 w-5 text-primary" />
             </div>
             <div>
-              <h2 class="text-lg font-semibold">AFK Status</h2>
+              <h2 class="text-lg font-semibold">AFK Timer</h2>
               <p class="text-sm text-muted-foreground">
-                Current AFK session information
+                Earn credits by staying AFK
               </p>
             </div>
           </div>
@@ -362,75 +417,122 @@ onUnmounted(() => {
             <Loader2 class="h-6 w-6 animate-spin text-primary" />
           </div>
 
-          <div v-else-if="afkStatus" class="space-y-4">
-            <!-- Status Badge -->
-            <div class="flex items-center gap-2">
-              <Badge :variant="isAFKActive ? 'default' : 'secondary'">
-                {{ isAFKActive ? "Active" : "Inactive" }}
-              </Badge>
-              <span class="text-sm text-muted-foreground">
-                {{
-                  isAFKActive
-                    ? "You're currently AFK and earning credits"
-                    : "AFK mode is not active"
-                }}
-              </span>
+          <div v-else-if="afkStatus" class="space-y-6">
+            <!-- Status Badge and Toggle -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Badge :variant="isActive ? 'default' : 'secondary'">
+                  {{ isActive ? "Active" : "Inactive" }}
+                </Badge>
+                <span class="text-sm text-muted-foreground">
+                  {{
+                    isActive
+                      ? "You're currently AFK and earning credits"
+                      : "AFK mode is not active"
+                  }}
+                </span>
+              </div>
+              <Button
+                @click="toggleAFK"
+                :disabled="loading"
+                :variant="isActive ? 'destructive' : 'default'"
+              >
+                <Play v-if="!isActive" class="h-4 w-4 mr-2" />
+                <Pause v-else class="h-4 w-4 mr-2" />
+                {{ isActive ? "Stop AFK" : "Start AFK" }}
+              </Button>
             </div>
 
-            <!-- Time Elapsed -->
+            <!-- Large Timer Display -->
             <div
-              v-if="isAFKActive"
-              class="flex items-center justify-between p-4 rounded-lg bg-muted/30 border border-border/50"
+              v-if="isActive"
+              class="bg-muted/30 rounded-xl p-8 text-center border border-border/50"
             >
-              <div class="flex items-center gap-3">
-                <div class="p-2 rounded-md bg-background">
-                  <Timer class="h-4 w-4 text-muted-foreground" />
-                </div>
-                <div>
-                  <div class="text-xs text-muted-foreground mb-1 font-medium">
-                    Time Elapsed
+              <div class="grid grid-cols-3 gap-4">
+                <div class="timer-unit">
+                  <div class="text-5xl font-bold text-white">
+                    {{ displayTime.hours }}
                   </div>
-                  <div class="text-2xl font-bold">{{ displayTime }}</div>
+                  <div
+                    class="text-xs text-muted-foreground uppercase tracking-wide mt-2"
+                  >
+                    Hours
+                  </div>
+                </div>
+                <div class="timer-unit">
+                  <div class="text-5xl font-bold text-white">
+                    {{ displayTime.minutes }}
+                  </div>
+                  <div
+                    class="text-xs text-muted-foreground uppercase tracking-wide mt-2"
+                  >
+                    Minutes
+                  </div>
+                </div>
+                <div class="timer-unit">
+                  <div class="text-5xl font-bold text-white">
+                    {{ displayTime.seconds }}
+                  </div>
+                  <div
+                    class="text-xs text-muted-foreground uppercase tracking-wide mt-2"
+                  >
+                    Seconds
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- Credits Earned -->
+            <!-- Credits Counter -->
             <div
-              v-if="afkStatus.credits_earned > 0"
-              class="flex items-center justify-between p-4 rounded-lg bg-green-500/10 border border-green-500/20"
+              v-if="isActive"
+              class="bg-muted/30 rounded-xl p-6 border border-border/50"
             >
-              <div class="flex items-center gap-3">
-                <div class="p-2 rounded-md bg-green-500/20">
-                  <Wallet class="h-4 w-4 text-green-500" />
+              <div class="flex justify-between items-center">
+                <div class="flex items-center">
+                  <div
+                    class="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center mr-3"
+                  >
+                    <Wallet class="h-5 w-5 text-yellow-500" />
+                  </div>
+                  <div>
+                    <div class="text-sm text-muted-foreground">
+                      Total Credits
+                    </div>
+                    <div class="text-2xl font-bold text-yellow-500">
+                      {{ totalCoins }}
+                    </div>
+                  </div>
                 </div>
                 <div>
-                  <div class="text-xs text-muted-foreground mb-1 font-medium">
-                    Credits Earned
+                  <div class="text-sm text-muted-foreground text-right">
+                    Current Session
                   </div>
-                  <div class="text-2xl font-bold text-green-500">
-                    {{ afkStatus.credits_formatted }}
+                  <div class="text-xl font-medium text-yellow-400">
+                    +{{ sessionCoins }} credits
+                  </div>
+                  <div class="text-xs text-muted-foreground text-right mt-1">
+                    ~{{ expectedCreditsPerMinute.toFixed(2) }} credits/min
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- Next Reward -->
-            <div
-              v-if="isAFKActive && nextRewardIn !== null && nextRewardIn > 0"
-              class="flex items-center justify-between p-4 rounded-lg bg-muted/30 border border-border/50"
-            >
-              <div class="flex items-center gap-3">
-                <div class="p-2 rounded-md bg-background">
-                  <Clock class="h-4 w-4 text-muted-foreground" />
+            <!-- AFK Stats -->
+            <div class="grid grid-cols-2 gap-4">
+              <div class="bg-muted/30 rounded-lg p-4 border border-border/50">
+                <div class="text-sm text-muted-foreground mb-1">
+                  Current Session
                 </div>
-                <div>
-                  <div class="text-xs text-muted-foreground mb-1 font-medium">
-                    Next Reward In
-                  </div>
-                  <div class="text-lg font-semibold">
-                    {{ displayNextReward }}
-                  </div>
+                <div class="text-lg font-semibold text-white">
+                  {{ formatTimeString(currentSessionTime) }}
+                </div>
+              </div>
+              <div class="bg-muted/30 rounded-lg p-4 border border-border/50">
+                <div class="text-sm text-muted-foreground mb-1">
+                  Total AFK Time
+                </div>
+                <div class="text-lg font-semibold text-white">
+                  {{ formatTimeString(totalAFKTime) }}
                 </div>
               </div>
             </div>
@@ -443,67 +545,37 @@ onUnmounted(() => {
         </div>
       </Card>
 
-      <!-- Actions Card -->
-      <Card>
-        <div class="p-6">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="p-2.5 rounded-lg bg-primary/10">
-              <Play class="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h2 class="text-lg font-semibold">Actions</h2>
-              <p class="text-sm text-muted-foreground">
-                Start or stop AFK mode, and claim your rewards
-              </p>
-            </div>
-          </div>
-
-          <div class="flex flex-col sm:flex-row gap-3">
-            <Button
-              v-if="!isAFKActive"
-              @click="handleStartAFK"
-              :disabled="loading"
-              class="flex-1"
-              size="lg"
-            >
-              <Play class="h-4 w-4 mr-2" />
-              Start AFK
-            </Button>
-
-            <Button
-              v-else
-              @click="handleStopAFK"
-              :disabled="loading"
-              variant="destructive"
-              class="flex-1"
-              size="lg"
-            >
-              <Pause class="h-4 w-4 mr-2" />
-              Stop AFK
-            </Button>
-
-            <Button
-              v-if="canClaimRewards"
-              @click="handleClaimRewards"
-              :disabled="loading"
-              variant="default"
-              class="flex-1"
-              size="lg"
-            >
-              <CheckCircle2 class="h-4 w-4 mr-2" />
-              Claim Rewards
-            </Button>
-          </div>
-
-          <Alert v-if="isAFKActive" class="mt-4">
-            <AlertCircle class="h-4 w-4" />
-            <AlertDescription class="text-sm">
-              AFK mode is active. You're earning credits! Remember to claim your
-              rewards periodically.
-            </AlertDescription>
-          </Alert>
-        </div>
-      </Card>
+      <Alert v-if="isActive" class="mt-4">
+        <AlertCircle class="h-4 w-4" />
+        <AlertDescription class="text-sm">
+          AFK mode is active. You're earning credits! Keep this tab active to
+          continue earning rewards.
+        </AlertDescription>
+      </Alert>
     </div>
   </div>
 </template>
+
+<style scoped>
+.timer-unit {
+  background-color: rgba(31, 41, 55, 0.5);
+  border-radius: 0.75rem;
+  padding: 1.25rem 0.5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.timer-unit::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    to right,
+    rgba(99, 102, 241, 0.2),
+    rgba(139, 92, 246, 0.2)
+  );
+}
+</style>

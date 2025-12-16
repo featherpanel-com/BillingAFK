@@ -163,20 +163,33 @@ onMounted(() => {
                 <!-- Credits Configuration -->
                 <div class="space-y-4">
                   <h3 class="text-lg font-semibold">Credits Configuration</h3>
+                  <p class="text-sm text-muted-foreground">
+                    Configure how users earn credits. You can use either method
+                    (or both). If both are set,
+                    <strong>credits_per_minute</strong> takes priority.
+                  </p>
 
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label for="credits_per_minute">Credits per Minute</Label>
                       <Input
                         id="credits_per_minute"
-                        v-model.number="settings.credits_per_minute"
+                        :model-value="settings.credits_per_minute ?? undefined"
+                        @update:model-value="
+                          settings.credits_per_minute = $event
+                            ? Number($event)
+                            : undefined
+                        "
                         type="number"
                         step="0.01"
                         min="0"
                         class="mt-2"
+                        placeholder="1.0"
                       />
                       <p class="text-sm text-muted-foreground mt-1">
-                        How many credits users earn per minute of AFK time
+                        How many credits users earn per minute of AFK time.
+                        Example: 0.5 = 1 credit every 2 minutes, 2.0 = 2 credits
+                        per minute.
                       </p>
                     </div>
 
@@ -194,86 +207,14 @@ onMounted(() => {
                         "
                         type="number"
                         step="0.01"
-                        min="0"
+                        min="0.01"
                         class="mt-2"
-                        placeholder="Leave empty to use credits per minute"
+                        placeholder="1"
                       />
                       <p class="text-sm text-muted-foreground mt-1">
-                        Alternative: minutes required to earn 1 credit
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Reward Interval -->
-                <div>
-                  <Label for="reward_interval_seconds"
-                    >Reward Interval (seconds)</Label
-                  >
-                  <Input
-                    id="reward_interval_seconds"
-                    v-model.number="settings.reward_interval_seconds"
-                    type="number"
-                    min="1"
-                    class="mt-2"
-                  />
-                  <p class="text-sm text-muted-foreground mt-1">
-                    How often to calculate and award credits (in seconds)
-                  </p>
-                </div>
-
-                <!-- Limits -->
-                <div class="space-y-4">
-                  <h3 class="text-lg font-semibold">Session Limits</h3>
-
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label for="max_credits_per_session"
-                        >Max Credits per Session</Label
-                      >
-                      <Input
-                        id="max_credits_per_session"
-                        :model-value="
-                          settings.max_credits_per_session ?? undefined
-                        "
-                        @update:model-value="
-                          settings.max_credits_per_session = $event
-                            ? Number($event)
-                            : null
-                        "
-                        type="number"
-                        min="0"
-                        class="mt-2"
-                        placeholder="No limit"
-                      />
-                      <p class="text-sm text-muted-foreground mt-1">
-                        Maximum credits that can be earned in a single session
-                        (leave empty for no limit)
-                      </p>
-                    </div>
-
-                    <div>
-                      <Label for="max_session_duration_seconds"
-                        >Max Session Duration (seconds)</Label
-                      >
-                      <Input
-                        id="max_session_duration_seconds"
-                        :model-value="
-                          settings.max_session_duration_seconds ?? undefined
-                        "
-                        @update:model-value="
-                          settings.max_session_duration_seconds = $event
-                            ? Number($event)
-                            : null
-                        "
-                        type="number"
-                        min="0"
-                        class="mt-2"
-                        placeholder="No limit"
-                      />
-                      <p class="text-sm text-muted-foreground mt-1">
-                        Maximum session duration in seconds (leave empty for no
-                        limit)
+                        Alternative: Minutes required to earn 1 credit. Example:
+                        5 = 1 credit every 5 minutes. Only used if
+                        credits_per_minute is not set.
                       </p>
                     </div>
                   </div>
@@ -362,64 +303,6 @@ onMounted(() => {
                   </div>
                 </div>
 
-                <!-- Claim Settings -->
-                <div class="space-y-4">
-                  <h3 class="text-lg font-semibold">Claim Settings</h3>
-
-                  <div
-                    class="flex items-center justify-between p-4 border rounded-lg"
-                  >
-                    <div>
-                      <Label class="text-base font-semibold"
-                        >Require Manual Claim</Label
-                      >
-                      <p class="text-sm text-muted-foreground">
-                        Users must manually claim their rewards
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      @click="settings.require_claim = !settings.require_claim"
-                      variant="ghost"
-                      size="sm"
-                    >
-                      <ToggleRight
-                        v-if="settings.require_claim"
-                        class="h-6 w-6 text-primary"
-                      />
-                      <ToggleLeft
-                        v-else
-                        class="h-6 w-6 text-muted-foreground"
-                      />
-                    </Button>
-                  </div>
-
-                  <div v-if="!settings.require_claim">
-                    <Label for="auto_claim_interval_seconds"
-                      >Auto-Claim Interval (seconds)</Label
-                    >
-                    <Input
-                      id="auto_claim_interval_seconds"
-                      :model-value="
-                        settings.auto_claim_interval_seconds ?? undefined
-                      "
-                      @update:model-value="
-                        settings.auto_claim_interval_seconds = $event
-                          ? Number($event)
-                          : null
-                      "
-                      type="number"
-                      min="1"
-                      class="mt-2"
-                      placeholder="Disabled"
-                    />
-                    <p class="text-sm text-muted-foreground mt-1">
-                      Automatically claim rewards after this many seconds (leave
-                      empty to disable)
-                    </p>
-                  </div>
-                </div>
-
                 <!-- JavaScript Injection -->
                 <div>
                   <h3 class="text-lg font-semibold mb-2">
@@ -504,12 +387,12 @@ onMounted(() => {
                       <th
                         class="text-left p-4 text-sm font-medium text-muted-foreground"
                       >
-                        Sessions
+                        Minutes AFK
                       </th>
                       <th
                         class="text-left p-4 text-sm font-medium text-muted-foreground"
                       >
-                        Last Session
+                        Last Seen AFK
                       </th>
                     </tr>
                   </thead>
@@ -541,11 +424,11 @@ onMounted(() => {
                       </td>
                       <td class="p-4">
                         <Badge variant="secondary">
-                          {{ stat.sessions_count }}
+                          {{ stat.minutes_afk || 0 }}m
                         </Badge>
                       </td>
                       <td class="p-4 text-sm text-muted-foreground">
-                        {{ stat.last_session_at || "Never" }}
+                        {{ stat.last_seen_afk || "Never" }}
                       </td>
                     </tr>
                   </tbody>

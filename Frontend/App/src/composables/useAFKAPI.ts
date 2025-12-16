@@ -3,15 +3,13 @@ import axios from "axios";
 import type { AxiosError } from "axios";
 
 export interface AFKStatus {
-  is_afk: boolean;
-  started_at: string | null;
-  credits_earned: number;
-  credits_formatted: string;
-  time_elapsed: number;
-  next_reward_in: number | null;
+  minutes_afk?: number;
+  last_seen_afk?: number;
   javascript_injection?: string;
   user_credits?: number;
   user_credits_formatted?: string;
+  credits_per_minute?: number | null;
+  minutes_per_credit?: number | null;
   daily_usage?: {
     credits_earned_today: number;
     sessions_today: number;
@@ -22,6 +20,12 @@ export interface AFKStatus {
     max_sessions_per_day: number | null;
     max_time_per_day_seconds: number | null;
   };
+}
+
+export interface WorkResponse {
+  credits_awarded: number;
+  total_credits: number;
+  total_afk_time: number;
 }
 
 export interface ClaimRewardsResponse {
@@ -133,6 +137,32 @@ export function useAFKAPI() {
     }
   };
 
+  // Work endpoint - called periodically to award credits (like MythicalDash)
+  const work = async (
+    creditsEarned: number,
+    minutesAfk: number
+  ): Promise<WorkResponse> => {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const response = await axios.post("/api/user/billingafk/work", {
+        credits_earned: creditsEarned,
+        minutes_afk: minutesAfk,
+      });
+      if (response.data && response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data?.message || "Failed to update AFK work");
+    } catch (err) {
+      const errorMsg = handleError(err);
+      error.value = errorMsg;
+      throw new Error(errorMsg);
+    } finally {
+      loading.value = false;
+    }
+  };
+
   return {
     loading,
     error,
@@ -140,5 +170,6 @@ export function useAFKAPI() {
     startAFK,
     stopAFK,
     claimRewards,
+    work,
   };
 }

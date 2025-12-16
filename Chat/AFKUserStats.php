@@ -64,7 +64,7 @@ class AFKUserStats
         // Create new stats record
         try {
             $stmt = $pdo->prepare(
-                'INSERT INTO ' . self::$table . ' (user_id) VALUES (:user_id)'
+                'INSERT INTO ' . self::$table . ' (user_id, minutes_afk, last_seen_afk) VALUES (:user_id, 0, 0)'
             );
             $stmt->execute(['user_id' => $userId]);
 
@@ -82,6 +82,94 @@ class AFKUserStats
             $stmt->execute(['user_id' => $userId]);
 
             return $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+        }
+    }
+
+    /**
+     * Increment minutes_afk and update last_seen_afk (like MythicalDash).
+     * Also performs rate limiting to prevent spam.
+     *
+     * @return array|null Returns updated stats on success, null on rate limit or error
+     */
+    public static function incrementAFKTime(int $userId, int $minSecondsBetweenCalls = 60): ?array
+    {
+        if (!self::assertUserExists($userId)) {
+            return null;
+        }
+
+        $pdo = Database::getPdoConnection();
+
+        try {
+            $pdo->beginTransaction();
+
+            // Lock row for update and check rate limit atomically
+            $stmt = $pdo->prepare(
+                'SELECT * FROM ' . self::$table . ' WHERE user_id = :user_id FOR UPDATE'
+            );
+            $stmt->execute(['user_id' => $userId]);
+            $stats = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+            $now = time();
+
+            // Rate limiting: Check if last call was too recent
+            // Only rate limit if last_seen_afk is a valid recent timestamp (not 0, not null, and reasonable)
+            if ($stats !== false && isset($stats['last_seen_afk'])) {
+                $lastSeenAfk = (int) ($stats['last_seen_afk'] ?? 0);
+                // Only check rate limit if last_seen_afk is a valid timestamp (greater than year 2020)
+                // This allows first-time calls (last_seen_afk = 0) and old data to pass through
+                if ($lastSeenAfk > 1577836800) { // Unix timestamp for 2020-01-01 (reasonable minimum)
+                    $timeSinceLastCall = $now - $lastSeenAfk;
+                    if ($timeSinceLastCall < $minSecondsBetweenCalls) {
+                        $pdo->rollBack();
+
+                        return null; // Rate limited
+                    }
+                }
+            }
+
+            if (!$stats) {
+                // Create if doesn't exist
+                $stmt = $pdo->prepare(
+                    'INSERT INTO ' . self::$table . ' (user_id, minutes_afk, last_seen_afk) VALUES (:user_id, 1, :timestamp)'
+                );
+                $stmt->execute([
+                    'user_id' => $userId,
+                    'timestamp' => $now,
+                ]);
+
+                // Get the newly created record
+                $stmt = $pdo->prepare('SELECT * FROM ' . self::$table . ' WHERE user_id = :user_id LIMIT 1');
+                $stmt->execute(['user_id' => $userId]);
+                $stats = $stmt->fetch(\PDO::FETCH_ASSOC);
+            } else {
+                // Update existing - increment minutes_afk and update last_seen_afk
+                $stmt = $pdo->prepare(
+                    'UPDATE ' . self::$table . ' SET 
+                        minutes_afk = minutes_afk + 1,
+                        last_seen_afk = :timestamp
+                    WHERE user_id = :user_id'
+                );
+                $stmt->execute([
+                    'user_id' => $userId,
+                    'timestamp' => $now,
+                ]);
+
+                // Get updated record
+                $stmt = $pdo->prepare('SELECT * FROM ' . self::$table . ' WHERE user_id = :user_id LIMIT 1');
+                $stmt->execute(['user_id' => $userId]);
+                $stats = $stmt->fetch(\PDO::FETCH_ASSOC);
+            }
+
+            $pdo->commit();
+
+            return $stats ?: null;
+        } catch (\PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            App::getInstance(true)->getLogger()->error('Failed to increment AFK time: ' . $e->getMessage());
+
+            return null;
         }
     }
 

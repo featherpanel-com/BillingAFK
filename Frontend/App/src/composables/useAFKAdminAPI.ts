@@ -3,18 +3,18 @@ import axios from "axios";
 import type { AxiosError } from "axios";
 
 export interface AFKSettings {
-  credits_per_minute: number;
-  minutes_per_credit: number | null;
-  reward_interval_seconds: number;
-  max_credits_per_session: number | null;
-  max_session_duration_seconds: number | null;
+  credits_per_minute?: number | null;
+  minutes_per_credit?: number | null;
+  reward_interval_seconds?: number;
+  max_credits_per_session?: number | null;
+  max_session_duration_seconds?: number | null;
   javascript_injection: string;
   is_enabled: boolean;
-  require_claim: boolean;
-  auto_claim_interval_seconds: number | null;
-  max_credits_per_day: number | null;
-  max_sessions_per_day: number | null;
-  max_time_per_day_seconds: number | null;
+  require_claim?: boolean;
+  auto_claim_interval_seconds?: number | null;
+  max_credits_per_day?: number | null;
+  max_sessions_per_day?: number | null;
+  max_time_per_day_seconds?: number | null;
 }
 
 export interface UserAFKStats {
@@ -25,8 +25,8 @@ export interface UserAFKStats {
   total_time_formatted: string;
   total_credits_earned: number;
   total_credits_formatted: string;
-  sessions_count: number;
-  last_session_at: string | null;
+  minutes_afk: number;
+  last_seen_afk: string;
 }
 
 export interface UserStatsResponse {

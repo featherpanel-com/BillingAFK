@@ -31,12 +31,12 @@
 namespace App\Addons\billingafk\Controllers\Admin;
 
 use App\Helpers\ApiResponse;
+use OpenApi\Attributes as OA;
 use App\Addons\billingafk\Chat\AFKUserStats;
 use App\Addons\billingafk\Helpers\AFKHelper;
-use App\Addons\billingcore\Helpers\CurrencyHelper;
-use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use App\Addons\billingcore\Helpers\CurrencyHelper;
 
 #[OA\Tag(name: 'Admin - Billing AFK', description: 'AFK rewards administration')]
 class BillingAFKController
@@ -76,6 +76,7 @@ class BillingAFKController
 
         try {
             AFKHelper::updateSettings($data);
+
             return ApiResponse::success(AFKHelper::getSettings(), 'Settings updated successfully', 200);
         } catch (\Exception $e) {
             return ApiResponse::error('Failed to update settings: ' . $e->getMessage(), 'UPDATE_FAILED', 500);
@@ -105,6 +106,19 @@ class BillingAFKController
             $totalHours = (int) floor($totalMinutes / 60);
             $totalDays = (int) floor($totalHours / 24);
 
+            // Get minutes_afk and last_seen_afk (handle case where columns might not exist)
+            $minutesAfk = isset($stat['minutes_afk']) ? (int) $stat['minutes_afk'] : 0;
+            $lastSeenAfk = isset($stat['last_seen_afk']) ? (int) $stat['last_seen_afk'] : 0;
+
+            // If minutes_afk is 0 but total_time_seconds > 0, use total_time_seconds as fallback
+            if ($minutesAfk === 0 && $totalMinutes > 0) {
+                $minutesAfk = $totalMinutes;
+            }
+
+            $lastSeenFormatted = $lastSeenAfk > 0
+                ? date('Y-m-d H:i:s', $lastSeenAfk)
+                : 'Never';
+
             return [
                 'user_id' => (int) $stat['user_id'],
                 'username' => $stat['username'] ?? 'Unknown',
@@ -113,8 +127,8 @@ class BillingAFKController
                 'total_time_formatted' => sprintf('%dd %dh %dm', $totalDays, $totalHours % 24, $totalMinutes % 60),
                 'total_credits_earned' => (int) $stat['total_credits_earned'],
                 'total_credits_formatted' => CurrencyHelper::formatAmount((int) $stat['total_credits_earned']),
-                'sessions_count' => (int) $stat['sessions_count'],
-                'last_session_at' => $stat['last_session_at'],
+                'minutes_afk' => $minutesAfk,
+                'last_seen_afk' => $lastSeenFormatted,
             ];
         }, $stats);
 
@@ -161,15 +175,20 @@ class BillingAFKController
         $totalHours = (int) floor($totalMinutes / 60);
         $totalDays = (int) floor($totalHours / 24);
 
+        $minutesAfk = (int) ($stats['minutes_afk'] ?? 0);
+        $lastSeenAfk = (int) ($stats['last_seen_afk'] ?? 0);
+        $lastSeenFormatted = $lastSeenAfk > 0
+            ? date('Y-m-d H:i:s', $lastSeenAfk)
+            : 'Never';
+
         return ApiResponse::success([
             'user_id' => (int) $stats['user_id'],
             'total_time_seconds' => (int) $stats['total_time_seconds'],
             'total_time_formatted' => sprintf('%dd %dh %dm', $totalDays, $totalHours % 24, $totalMinutes % 60),
             'total_credits_earned' => (int) $stats['total_credits_earned'],
             'total_credits_formatted' => CurrencyHelper::formatAmount((int) $stats['total_credits_earned']),
-            'sessions_count' => (int) $stats['sessions_count'],
-            'last_session_at' => $stats['last_session_at'],
+            'minutes_afk' => $minutesAfk,
+            'last_seen_afk' => $lastSeenFormatted,
         ], 'Statistics retrieved successfully', 200);
     }
 }
-
