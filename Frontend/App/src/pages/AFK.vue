@@ -5,13 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-  Clock,
   Play,
   Pause,
   Wallet,
   Loader2,
   Timer,
   AlertCircle,
+  Sparkles,
+  TrendingUp,
 } from "lucide-vue-next";
 import { useAFKAPI } from "@/composables/useAFKAPI";
 import { useToast } from "vue-toastification";
@@ -282,37 +283,52 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="w-full h-full overflow-auto p-4">
-    <div class="container mx-auto max-w-4xl">
-      <div class="mb-6">
-        <div class="flex items-center gap-1.5 mb-0.5">
-          <Timer class="h-4 w-4 text-primary" />
-          <h1 class="text-lg font-semibold">AFK Rewards</h1>
+  <div
+    class="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 p-4 md:p-8"
+  >
+    <div class="max-w-5xl mx-auto space-y-8">
+      <!-- Header Section -->
+      <div class="text-center space-y-4">
+        <div class="flex items-center justify-center gap-3">
+          <div class="relative">
+            <div
+              class="absolute inset-0 bg-primary/20 blur-2xl rounded-full"
+            ></div>
+            <Timer class="relative h-12 w-12 text-primary" />
+          </div>
         </div>
-        <p class="text-xs text-muted-foreground ml-5.5">
-          Earn credits by staying AFK. Start the timer and keep this tab active!
-        </p>
+        <div>
+          <h1
+            class="text-5xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent"
+          >
+            AFK Rewards
+          </h1>
+          <p class="text-lg text-muted-foreground mt-2">
+            Earn credits by staying AFK. Start the timer and keep this tab
+            active!
+          </p>
+        </div>
       </div>
 
       <!-- User Credits Card -->
       <Card
         v-if="afkStatus?.user_credits !== undefined"
-        class="mb-4 border-primary/20"
+        class="p-8 md:p-10 border-2 shadow-xl bg-card/50 backdrop-blur-sm"
       >
-        <div class="p-6">
+        <div class="space-y-4">
           <div class="flex items-center gap-3 mb-4">
-            <div class="p-2.5 rounded-lg bg-primary/10">
-              <Wallet class="h-5 w-5 text-primary" />
+            <div class="p-2 rounded-lg bg-primary/10">
+              <Wallet class="h-6 w-6 text-primary" />
             </div>
             <div>
-              <h2 class="text-lg font-semibold">Your Credits</h2>
+              <h2 class="text-2xl font-bold">Your Credits</h2>
               <p class="text-sm text-muted-foreground">
                 Current credit balance
               </p>
             </div>
           </div>
           <div class="flex items-baseline gap-2">
-            <div class="text-3xl font-bold">
+            <div class="text-4xl font-bold">
               {{ afkStatus.user_credits_formatted || "0" }}
             </div>
           </div>
@@ -327,15 +343,15 @@ onUnmounted(() => {
             afkStatus.daily_limits.max_sessions_per_day ||
             afkStatus.daily_limits.max_time_per_day_seconds)
         "
-        class="mb-4 border-blue-500/20"
+        class="p-6 border-2 shadow-lg bg-card/50 backdrop-blur-sm"
       >
-        <div class="p-6">
+        <div class="space-y-4">
           <div class="flex items-center gap-3 mb-4">
-            <div class="p-2.5 rounded-lg bg-blue-500/10">
-              <AlertCircle class="h-5 w-5 text-blue-500" />
+            <div class="p-2 rounded-lg bg-blue-500/10">
+              <AlertCircle class="h-6 w-6 text-blue-500" />
             </div>
             <div>
-              <h2 class="text-lg font-semibold">Daily Limits</h2>
+              <h2 class="text-xl font-bold">Daily Limits</h2>
               <p class="text-sm text-muted-foreground">
                 Your daily usage and limits
               </p>
@@ -344,9 +360,9 @@ onUnmounted(() => {
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div
               v-if="afkStatus.daily_limits.max_credits_per_day"
-              class="p-3 rounded-lg bg-muted/30 border border-border/50"
+              class="p-4 rounded-lg bg-muted/50 border border-border/50"
             >
-              <div class="text-xs text-muted-foreground mb-1 font-medium">
+              <div class="text-sm text-muted-foreground mb-1 font-medium">
                 Credits Today
               </div>
               <div class="text-lg font-semibold">
@@ -356,9 +372,9 @@ onUnmounted(() => {
             </div>
             <div
               v-if="afkStatus.daily_limits.max_sessions_per_day"
-              class="p-3 rounded-lg bg-muted/30 border border-border/50"
+              class="p-4 rounded-lg bg-muted/50 border border-border/50"
             >
-              <div class="text-xs text-muted-foreground mb-1 font-medium">
+              <div class="text-sm text-muted-foreground mb-1 font-medium">
                 Sessions Today
               </div>
               <div class="text-lg font-semibold">
@@ -368,9 +384,9 @@ onUnmounted(() => {
             </div>
             <div
               v-if="afkStatus.daily_limits.max_time_per_day_seconds"
-              class="p-3 rounded-lg bg-muted/30 border border-border/50"
+              class="p-4 rounded-lg bg-muted/50 border border-border/50"
             >
-              <div class="text-xs text-muted-foreground mb-1 font-medium">
+              <div class="text-sm text-muted-foreground mb-1 font-medium">
                 Time Today
               </div>
               <div class="text-lg font-semibold">
@@ -396,32 +412,35 @@ onUnmounted(() => {
       </Card>
 
       <!-- Main AFK Timer Card -->
-      <Card class="mb-4 border-primary/20">
-        <div class="p-6">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="p-2.5 rounded-lg bg-primary/10">
-              <Clock class="h-5 w-5 text-primary" />
+      <Card class="p-8 md:p-10 border-2 shadow-xl bg-card/50 backdrop-blur-sm">
+        <div class="space-y-6">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-primary/10">
+              <Sparkles class="h-6 w-6 text-primary" />
             </div>
             <div>
-              <h2 class="text-lg font-semibold">AFK Timer</h2>
+              <h2 class="text-2xl font-bold">AFK Timer</h2>
               <p class="text-sm text-muted-foreground">
-                Earn credits by staying AFK
+                Start earning credits by staying AFK
               </p>
             </div>
           </div>
 
           <div
             v-if="loading && !afkStatus"
-            class="flex items-center justify-center py-8"
+            class="flex items-center justify-center py-12"
           >
-            <Loader2 class="h-6 w-6 animate-spin text-primary" />
+            <Loader2 class="h-8 w-8 animate-spin text-primary" />
           </div>
 
           <div v-else-if="afkStatus" class="space-y-6">
             <!-- Status Badge and Toggle -->
             <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <Badge :variant="isActive ? 'default' : 'secondary'">
+              <div class="flex items-center gap-3">
+                <Badge
+                  :variant="isActive ? 'default' : 'secondary'"
+                  class="px-4 py-1.5 text-sm font-semibold"
+                >
                   {{ isActive ? "Active" : "Inactive" }}
                 </Badge>
                 <span class="text-sm text-muted-foreground">
@@ -436,9 +455,11 @@ onUnmounted(() => {
                 @click="toggleAFK"
                 :disabled="loading"
                 :variant="isActive ? 'destructive' : 'default'"
+                class="h-12 px-6 text-base font-semibold shadow-lg hover:shadow-xl transition-all"
+                size="lg"
               >
-                <Play v-if="!isActive" class="h-4 w-4 mr-2" />
-                <Pause v-else class="h-4 w-4 mr-2" />
+                <Play v-if="!isActive" class="h-5 w-5 mr-2" />
+                <Pause v-else class="h-5 w-5 mr-2" />
                 {{ isActive ? "Stop AFK" : "Start AFK" }}
               </Button>
             </div>
@@ -446,11 +467,11 @@ onUnmounted(() => {
             <!-- Large Timer Display -->
             <div
               v-if="isActive"
-              class="bg-muted/30 rounded-xl p-8 text-center border border-border/50"
+              class="bg-muted/30 rounded-xl p-8 text-center border-2 border-border/50"
             >
               <div class="grid grid-cols-3 gap-4">
                 <div class="timer-unit">
-                  <div class="text-5xl font-bold text-white">
+                  <div class="text-5xl font-bold">
                     {{ displayTime.hours }}
                   </div>
                   <div
@@ -460,7 +481,7 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <div class="timer-unit">
-                  <div class="text-5xl font-bold text-white">
+                  <div class="text-5xl font-bold">
                     {{ displayTime.minutes }}
                   </div>
                   <div
@@ -470,7 +491,7 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <div class="timer-unit">
-                  <div class="text-5xl font-bold text-white">
+                  <div class="text-5xl font-bold">
                     {{ displayTime.seconds }}
                   </div>
                   <div
@@ -485,20 +506,20 @@ onUnmounted(() => {
             <!-- Credits Counter -->
             <div
               v-if="isActive"
-              class="bg-muted/30 rounded-xl p-6 border border-border/50"
+              class="bg-muted/30 rounded-xl p-6 border-2 border-border/50"
             >
               <div class="flex justify-between items-center">
                 <div class="flex items-center">
                   <div
-                    class="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center mr-3"
+                    class="w-12 h-12 rounded-full bg-yellow-500/20 flex items-center justify-center mr-4"
                   >
-                    <Wallet class="h-5 w-5 text-yellow-500" />
+                    <Wallet class="h-6 w-6 text-yellow-500" />
                   </div>
                   <div>
                     <div class="text-sm text-muted-foreground">
                       Total Credits
                     </div>
-                    <div class="text-2xl font-bold text-yellow-500">
+                    <div class="text-3xl font-bold text-yellow-500">
                       {{ totalCoins }}
                     </div>
                   </div>
@@ -507,7 +528,7 @@ onUnmounted(() => {
                   <div class="text-sm text-muted-foreground text-right">
                     Current Session
                   </div>
-                  <div class="text-xl font-medium text-yellow-400">
+                  <div class="text-2xl font-medium text-yellow-400">
                     +{{ sessionCoins }} credits
                   </div>
                   <div class="text-xs text-muted-foreground text-right mt-1">
@@ -519,33 +540,52 @@ onUnmounted(() => {
 
             <!-- AFK Stats -->
             <div class="grid grid-cols-2 gap-4">
-              <div class="bg-muted/30 rounded-lg p-4 border border-border/50">
-                <div class="text-sm text-muted-foreground mb-1">
+              <div class="bg-muted/30 rounded-lg p-5 border border-border/50">
+                <div class="text-sm text-muted-foreground mb-2 font-medium">
                   Current Session
                 </div>
-                <div class="text-lg font-semibold text-white">
+                <div class="text-xl font-semibold">
                   {{ formatTimeString(currentSessionTime) }}
                 </div>
               </div>
-              <div class="bg-muted/30 rounded-lg p-4 border border-border/50">
-                <div class="text-sm text-muted-foreground mb-1">
+              <div class="bg-muted/30 rounded-lg p-5 border border-border/50">
+                <div class="text-sm text-muted-foreground mb-2 font-medium">
                   Total AFK Time
                 </div>
-                <div class="text-lg font-semibold text-white">
+                <div class="text-xl font-semibold">
                   {{ formatTimeString(totalAFKTime) }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Info Box -->
+            <div
+              class="mt-6 p-4 rounded-lg bg-muted/50 border border-border/50"
+            >
+              <div class="flex items-start gap-3">
+                <TrendingUp class="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                <div class="text-sm text-muted-foreground">
+                  <p class="font-medium text-foreground mb-1">How it works</p>
+                  <p>
+                    Click "Start AFK" to begin earning credits. Keep this tab
+                    active and visible to continue earning. Credits are awarded
+                    automatically every minute based on your AFK time.
+                  </p>
                 </div>
               </div>
             </div>
           </div>
 
-          <Alert v-else-if="error" class="mt-4">
+          <Alert v-else-if="error" variant="destructive" class="border-2">
             <AlertCircle class="h-4 w-4" />
-            <AlertDescription class="text-sm">{{ error }}</AlertDescription>
+            <AlertDescription class="font-medium text-sm">{{
+              error
+            }}</AlertDescription>
           </Alert>
         </div>
       </Card>
 
-      <Alert v-if="isActive" class="mt-4">
+      <Alert v-if="isActive" class="border-2">
         <AlertCircle class="h-4 w-4" />
         <AlertDescription class="text-sm">
           AFK mode is active. You're earning credits! Keep this tab active to
@@ -560,9 +600,10 @@ onUnmounted(() => {
 .timer-unit {
   background-color: rgba(31, 41, 55, 0.5);
   border-radius: 0.75rem;
-  padding: 1.25rem 0.5rem;
+  padding: 1.5rem 0.75rem;
   position: relative;
   overflow: hidden;
+  border: 2px solid rgba(99, 102, 241, 0.2);
 }
 
 .timer-unit::before {
@@ -571,11 +612,11 @@ onUnmounted(() => {
   top: 0;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 3px;
   background: linear-gradient(
     to right,
-    rgba(99, 102, 241, 0.2),
-    rgba(139, 92, 246, 0.2)
+    rgba(99, 102, 241, 0.4),
+    rgba(139, 92, 246, 0.4)
   );
 }
 </style>
