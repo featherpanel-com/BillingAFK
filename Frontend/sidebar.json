@@ -20,7 +20,7 @@
       "component": "/billingafk/dist/admin.html",
       "description": "Configure AFK rewards and view statistics",
       "category": "admin",
-      "group": "Billing"
+      "group": "Fremium Earn Credits"
     }
   },
   "server": {}
