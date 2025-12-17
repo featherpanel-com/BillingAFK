@@ -31,18 +31,18 @@
 namespace App\Addons\billingafk\Chat;
 
 use App\App;
-use App\Chat\Database;
 use App\Chat\User;
+use App\Chat\Database;
 
 /**
- * AFK Session chat model for managing AFK sessions
+ * AFK Session chat model for managing AFK sessions.
  */
 class AFKSession
 {
     private static string $table = 'featherpanel_billingafk_sessions';
 
     /**
-     * Get active session for a user
+     * Get active session for a user.
      */
     public static function getActiveSession(int $userId): ?array
     {
@@ -60,7 +60,7 @@ class AFKSession
     }
 
     /**
-     * Start a new AFK session
+     * Start a new AFK session.
      */
     public static function startSession(int $userId): ?array
     {
@@ -85,12 +85,13 @@ class AFKSession
             return self::getActiveSession($userId);
         } catch (\PDOException $e) {
             App::getInstance(true)->getLogger()->error('Failed to start AFK session: ' . $e->getMessage());
+
             return null;
         }
     }
 
     /**
-     * Stop an active session
+     * Stop an active session.
      */
     public static function stopSession(int $userId): bool
     {
@@ -109,12 +110,13 @@ class AFKSession
             return $stmt->rowCount() > 0;
         } catch (\PDOException $e) {
             App::getInstance(true)->getLogger()->error('Failed to stop AFK session: ' . $e->getMessage());
+
             return false;
         }
     }
 
     /**
-     * Update session credits and time
+     * Update session credits and time.
      */
     public static function updateSession(int $sessionId, int $creditsEarned, int $timeElapsed): bool
     {
@@ -133,12 +135,13 @@ class AFKSession
             return true;
         } catch (\PDOException $e) {
             App::getInstance(true)->getLogger()->error('Failed to update AFK session: ' . $e->getMessage());
+
             return false;
         }
     }
 
     /**
-     * Get the last claim time for a session
+     * Get the last claim time for a session.
      */
     public static function getLastClaimTime(int $sessionId): ?\DateTime
     {
@@ -157,7 +160,7 @@ class AFKSession
     }
 
     /**
-     * Get claimed credits for a session
+     * Get claimed credits for a session.
      */
     public static function getClaimedCredits(int $sessionId): int
     {
@@ -172,7 +175,7 @@ class AFKSession
     }
 
     /**
-     * Claim rewards from a session
+     * Claim rewards from a session.
      */
     public static function claimRewards(int $userId, int $sessionId, int $creditsToClaim): ?array
     {
@@ -190,6 +193,7 @@ class AFKSession
 
             if (!$session) {
                 $pdo->rollBack();
+
                 return null;
             }
 
@@ -200,6 +204,7 @@ class AFKSession
             // Validate credits to claim
             if ($creditsToClaim <= 0 || $creditsToClaim > $availableCredits) {
                 $pdo->rollBack();
+
                 return null;
             }
 
@@ -225,12 +230,13 @@ class AFKSession
                 $pdo->rollBack();
             }
             App::getInstance(true)->getLogger()->error('Failed to claim rewards: ' . $e->getMessage());
+
             return null;
         }
     }
 
     /**
-     * Get user's session history
+     * Get user's session history.
      */
     public static function getUserSessions(int $userId, int $limit = 10): array
     {
@@ -256,7 +262,7 @@ class AFKSession
         }
 
         $user = User::getUserById($userId);
+
         return $user !== null;
     }
 }
-
