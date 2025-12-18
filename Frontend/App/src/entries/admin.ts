@@ -15,4 +15,5 @@ app.use(Toast, {
 // Enable dark mode by default
 document.documentElement.classList.add("dark");
 
+
 app.mount("#app");

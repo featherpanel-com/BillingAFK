@@ -1,10 +1,10 @@
 {
   "client": {
-    "/billingafk": {
-      "name": "AFK Rewards",
+    "/earn/afk": {
+      "name": "AFK Earnings",
       "icon": "⏱️",
       "showBadge": false,
-      "redirect": "/billingafk",
+      "redirect": "/earn/afk",
       "component": "/billingafk/dist/afk.html",
       "description": "Earn credits by staying AFK",
       "category": "client",

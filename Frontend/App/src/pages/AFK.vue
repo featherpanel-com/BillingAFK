@@ -284,7 +284,7 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 p-4 md:p-8"
+    class="min-h-screen p-4 md:p-8"
   >
     <div class="max-w-5xl mx-auto space-y-8">
       <!-- Header Section -->
