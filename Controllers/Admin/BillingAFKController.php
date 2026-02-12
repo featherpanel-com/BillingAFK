@@ -56,7 +56,7 @@ class BillingAFKController
     )]
     public function updateSettings(Request $request): Response
     {
-        $data = json_decode($request->getContent(), true);
+        $data = json_decode($request->getContent() ?: '{}', true, 32);
         if (json_last_error() !== JSON_ERROR_NONE) {
             return ApiResponse::error('Invalid JSON in request body', 'INVALID_JSON', 400);
         }
