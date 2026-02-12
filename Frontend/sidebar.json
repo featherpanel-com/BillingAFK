@@ -5,6 +5,7 @@
       "icon": "⏱️",
       "showBadge": false,
       "redirect": "/earn/afk",
+      "lucideIcon": "timer",
       "component": "/billingafk/dist/afk.html",
       "description": "Earn credits by staying AFK",
       "category": "client",
@@ -15,6 +16,7 @@
     "/billingafk": {
       "name": "AFK Rewards",
       "icon": "⏱️",
+      "lucideIcon": "timer",
       "showBadge": false,
       "redirect": "/billingafk",
       "component": "/billingafk/dist/admin.html",
