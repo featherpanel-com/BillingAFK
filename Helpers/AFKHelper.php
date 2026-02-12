@@ -37,7 +37,11 @@ class AFKHelper
             'reward_interval_seconds' => (int) (self::getSetting('reward_interval_seconds') ?? 60),
             'max_credits_per_session' => self::getSetting('max_credits_per_session') ? (int) self::getSetting('max_credits_per_session') : null,
             'max_session_duration_seconds' => self::getSetting('max_session_duration_seconds') ? (int) self::getSetting('max_session_duration_seconds') : null,
-            'javascript_injection' => self::getSetting('javascript_injection') ?? '',
+            'javascript_injection' => html_entity_decode(
+                self::getSetting('javascript_injection') ?? '',
+                ENT_QUOTES | ENT_HTML5,
+                'UTF-8'
+            ),
             'is_enabled' => self::getSetting('is_enabled') === '1' || self::getSetting('is_enabled') === 'true',
             'require_claim' => self::getSetting('require_claim') !== '0' && self::getSetting('require_claim') !== 'false',
             'auto_claim_interval_seconds' => self::getSetting('auto_claim_interval_seconds') ? (int) self::getSetting('auto_claim_interval_seconds') : null,

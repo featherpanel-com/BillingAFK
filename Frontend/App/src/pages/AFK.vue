@@ -144,8 +144,19 @@ const loadStatus = async () => {
     // Inject JavaScript if provided
     if (status.javascript_injection && status.javascript_injection.trim()) {
       try {
+        // Decode HTML entities (backend stores with htmlspecialchars, e.g. &quot; -> ")
+        // Loop handles double-encoding (e.g. &amp;quot; -> &quot; -> ")
+        let code = status.javascript_injection;
+        let prev = "";
+        while (prev !== code) {
+          prev = code;
+          const el = document.createElement("textarea");
+          el.innerHTML = code;
+          code = el.value;
+        }
+
         const script = document.createElement("script");
-        script.textContent = status.javascript_injection;
+        script.textContent = code;
         document.head.appendChild(script);
         setTimeout(() => {
           if (script.parentNode) {

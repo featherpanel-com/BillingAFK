@@ -52,7 +52,11 @@ class BillingAFKController
         }
 
         $settings = AFKHelper::getSettings();
-        $javascriptInjection = $settings['javascript_injection'] ?? '';
+        $javascriptInjection = html_entity_decode(
+            $settings['javascript_injection'] ?? '',
+            ENT_QUOTES | ENT_HTML5,
+            'UTF-8'
+        );
 
         // Get user's current credits balance
         $userCredits = CreditsHelper::getUserCredits($user['id']);
