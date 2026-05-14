@@ -169,6 +169,76 @@ onMounted(() => {
                   </button>
                 </div>
 
+                <!-- Require Active Tab -->
+                <div
+                  class="flex items-center justify-between p-4 rounded-lg bg-muted/30 border border-border/50"
+                >
+                  <div>
+                    <Label class="text-base font-semibold"
+                      >Require Active Tab</Label
+                    >
+                    <p class="text-sm text-muted-foreground">
+                      Pause rewards when the user minimizes the browser or
+                      switches tabs
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    :aria-checked="settings.require_active_tab"
+                    @click="
+                      settings.require_active_tab = !settings.require_active_tab
+                    "
+                    :class="[
+                      'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background',
+                      settings.require_active_tab ? 'bg-primary' : 'bg-muted',
+                    ]"
+                  >
+                    <span
+                      class="pointer-events-none block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform"
+                      :class="
+                        settings.require_active_tab
+                          ? 'translate-x-5'
+                          : 'translate-x-0.5'
+                      "
+                    />
+                  </button>
+                </div>
+
+                <!-- Require Captcha -->
+                <div
+                  class="flex items-center justify-between p-4 rounded-lg bg-muted/30 border border-border/50"
+                >
+                  <div>
+                    <Label class="text-base font-semibold"
+                      >Require Captcha</Label
+                    >
+                    <p class="text-sm text-muted-foreground">
+                      Force users to solve a captcha before they can start an
+                      AFK session
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    :aria-checked="settings.require_captcha"
+                    @click="settings.require_captcha = !settings.require_captcha"
+                    :class="[
+                      'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background',
+                      settings.require_captcha ? 'bg-primary' : 'bg-muted',
+                    ]"
+                  >
+                    <span
+                      class="pointer-events-none block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform"
+                      :class="
+                        settings.require_captcha
+                          ? 'translate-x-5'
+                          : 'translate-x-0.5'
+                      "
+                    />
+                  </button>
+                </div>
+
                 <!-- Credits Configuration -->
                 <div class="space-y-4">
                   <h3 class="text-lg font-semibold">Credits Configuration</h3>

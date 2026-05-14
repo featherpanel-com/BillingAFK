@@ -14,6 +14,7 @@ import {
   Sparkles,
   TrendingUp,
 } from "lucide-vue-next";
+import Captcha from "@/components/Captcha.vue";
 import { useAFKAPI } from "@/composables/useAFKAPI";
 import { useToast } from "vue-toastification";
 import axios from "axios";
@@ -40,7 +41,18 @@ const afkStatus = ref<{
     max_sessions_per_day: number | null;
     max_time_per_day_seconds: number | null;
   };
+  require_active_tab?: boolean;
+  require_captcha?: boolean;
+  captcha?: {
+    provider: string;
+    site_key: string;
+    enabled: boolean;
+  };
 } | null>(null);
+
+const captchaToken = ref<string | null>(null);
+const captchaVerified = ref(false);
+const captchaWidget = ref<any>(null);
 
 const isActive = ref(false);
 const seconds = ref(0);
@@ -116,6 +128,8 @@ const isUserActive = (): boolean => {
 
 // Handle visibility change
 const handleVisibilityChange = () => {
+  if (!afkStatus.value?.require_active_tab) return;
+
   if (!isUserActive() && isActive.value) {
     // User switched to another tab or minimized the window
     stopTimer();
@@ -175,17 +189,64 @@ const loadStatus = async () => {
 };
 
 // Toggle AFK mode (like MythicalDash - no backend session, just local state)
-const toggleAFK = () => {
-  if (isActive.value) {
-    stopTimer();
-  } else {
-    startTimer();
+const startAFK = async () => {
+  if (afkStatus.value?.require_captcha && !captchaVerified.value) {
+    if (captchaWidget.value) {
+      try {
+        await captchaWidget.value.execute();
+        // If it's synchronous (like some providers), we might get the token immediately.
+        // If not, the verify callback will trigger startAFK again or we can wait.
+        // For simplicity, we'll let the verify callback handle the state change if needed,
+        // or just toast a message.
+        toast.info("Verifying security...");
+        return;
+      } catch (err) {
+        toast.error("Captcha verification failed");
+        return;
+      }
+    }
+    toast.error("Please complete the captcha first");
+    return;
   }
+  isActive.value = true;
+  seconds.value = 0;
+  sessionCoins.value = 0;
+  currentSessionTime.value = 0;
+  startTimer();
+  toast.success("AFK Mode started!");
+};
+
+const stopAFK = () => {
+  isActive.value = false;
+  stopTimer();
+  // Reset captcha if enabled
+  if (afkStatus.value?.require_captcha) {
+    captchaToken.value = null;
+    captchaVerified.value = false;
+    if (captchaWidget.value) {
+      captchaWidget.value.reset();
+    }
+  }
+  toast.info("AFK Mode stopped");
+};
+
+const onCaptchaVerify = (token: string) => {
+  captchaToken.value = token;
+  captchaVerified.value = true;
+  // Automatically start if we are not active
+  if (!isActive.value) {
+    startAFK();
+  }
+};
+
+const onCaptchaExpire = () => {
+  captchaToken.value = null;
+  captchaVerified.value = false;
 };
 
 // Start the timer
 const startTimer = () => {
-  if (!isUserActive()) {
+  if (afkStatus.value?.require_active_tab && !isUserActive()) {
     toast.warning("Please keep this tab active to start earning AFK rewards.");
     return;
   }
@@ -198,7 +259,7 @@ const startTimer = () => {
 
   // Start the main timer
   timerInterval = window.setInterval(() => {
-    if (!isUserActive()) {
+    if (afkStatus.value?.require_active_tab && !isUserActive()) {
       stopTimer();
       return;
     }
@@ -462,11 +523,28 @@ onUnmounted(() => {
                   }}
                 </span>
               </div>
+
+              <!-- Captcha Widget -->
+              <div
+                v-if="!isActive && afkStatus?.require_captcha && afkStatus?.captcha?.enabled"
+                class="mt-4 flex flex-col items-center justify-center p-4 rounded-xl bg-muted/30 border border-border/50"
+              >
+                <p class="text-sm font-medium mb-2 text-center">Security Verification</p>
+                <Captcha
+                  ref="captchaWidget"
+                  :provider="afkStatus.captcha.provider"
+                  :config="afkStatus.captcha"
+                  @verify="onCaptchaVerify"
+                  @expire="onCaptchaExpire"
+                  @error="(err: any) => toast.error('Captcha error: ' + err)"
+                />
+              </div>
+
               <Button
-                @click="toggleAFK"
-                :disabled="loading"
+                @click="isActive ? stopAFK() : startAFK()"
+                :disabled="loading || (!isActive && afkStatus?.require_captcha && !captchaVerified && !captchaWidget)"
                 :variant="isActive ? 'destructive' : 'default'"
-                class="h-12 px-6 text-base font-semibold shadow-lg hover:shadow-xl transition-all"
+                class="h-12 px-6 text-base font-semibold shadow-lg hover:shadow-xl transition-all mt-4"
                 size="lg"
               >
                 <Play v-if="!isActive" class="h-5 w-5 mr-2" />

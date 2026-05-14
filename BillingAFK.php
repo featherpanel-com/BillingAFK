@@ -18,6 +18,7 @@
 namespace App\Addons\billingafk;
 
 use App\Plugins\AppPlugin;
+use App\Addons\billingafk\Helpers\AFKHelper;
 
 class BillingAFK implements AppPlugin
 {
@@ -33,6 +34,7 @@ class BillingAFK implements AppPlugin
     {
         // Plugin installation logic
         // Create tables, directories, etc.
+        AFKHelper::setSetting('require_active_tab', 'true');
     }
 
     public static function pluginUpdate(?string $oldVersion, ?string $newVersion): void

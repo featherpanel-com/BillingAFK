@@ -15,6 +15,8 @@ export interface AFKSettings {
   max_credits_per_day?: number | null;
   max_sessions_per_day?: number | null;
   max_time_per_day_seconds?: number | null;
+  require_active_tab: boolean;
+  require_captcha: boolean;
 }
 
 export interface UserAFKStats {

@@ -31,25 +31,52 @@ class AFKHelper
      */
     public static function getSettings(): array
     {
-        return [
-            'credits_per_minute' => (float) (self::getSetting('credits_per_minute') ?? 1.0),
-            'minutes_per_credit' => self::getSetting('minutes_per_credit') ? (float) self::getSetting('minutes_per_credit') : null,
-            'reward_interval_seconds' => (int) (self::getSetting('reward_interval_seconds') ?? 60),
-            'max_credits_per_session' => self::getSetting('max_credits_per_session') ? (int) self::getSetting('max_credits_per_session') : null,
-            'max_session_duration_seconds' => self::getSetting('max_session_duration_seconds') ? (int) self::getSetting('max_session_duration_seconds') : null,
-            'javascript_injection' => html_entity_decode(
-                self::getSetting('javascript_injection') ?? '',
+        $defaults = [
+            'credits_per_minute' => 1.0,
+            'minutes_per_credit' => null,
+            'reward_interval_seconds' => 60,
+            'max_credits_per_session' => null,
+            'max_session_duration_seconds' => null,
+            'javascript_injection' => '',
+            'is_enabled' => true,
+            'require_claim' => true,
+            'auto_claim_interval_seconds' => null,
+            'max_credits_per_day' => null,
+            'max_sessions_per_day' => null,
+            'max_time_per_day_seconds' => null,
+            'require_active_tab' => true,
+            'require_captcha' => false,
+        ];
+
+        $settings = [];
+        foreach ($defaults as $key => $defaultValue) {
+            $value = self::getSetting($key);
+
+            if ($value === null) {
+                $settings[$key] = $defaultValue;
+            } else {
+                if (is_bool($defaultValue)) {
+                    $settings[$key] = ($value === '1' || $value === 'true');
+                } elseif (is_int($defaultValue)) {
+                    $settings[$key] = (int) $value;
+                } elseif (is_float($defaultValue)) {
+                    $settings[$key] = (float) $value;
+                } else {
+                    $settings[$key] = $value;
+                }
+            }
+        }
+
+        // Special handling for javascript_injection
+        if (isset($settings['javascript_injection']) && is_string($settings['javascript_injection'])) {
+            $settings['javascript_injection'] = html_entity_decode(
+                $settings['javascript_injection'],
                 ENT_QUOTES | ENT_HTML5,
                 'UTF-8'
-            ),
-            'is_enabled' => self::getSetting('is_enabled') === '1' || self::getSetting('is_enabled') === 'true',
-            'require_claim' => self::getSetting('require_claim') !== '0' && self::getSetting('require_claim') !== 'false',
-            'auto_claim_interval_seconds' => self::getSetting('auto_claim_interval_seconds') ? (int) self::getSetting('auto_claim_interval_seconds') : null,
-            // Daily limits
-            'max_credits_per_day' => self::getSetting('max_credits_per_day') ? (int) self::getSetting('max_credits_per_day') : null,
-            'max_sessions_per_day' => self::getSetting('max_sessions_per_day') ? (int) self::getSetting('max_sessions_per_day') : null,
-            'max_time_per_day_seconds' => self::getSetting('max_time_per_day_seconds') ? (int) self::getSetting('max_time_per_day_seconds') : null,
-        ];
+            );
+        }
+
+        return $settings;
     }
 
     /**
@@ -57,12 +84,24 @@ class AFKHelper
      */
     public static function updateSettings(array $settings): void
     {
+        $validKeys = [
+            'credits_per_minute', 'minutes_per_credit', 'reward_interval_seconds',
+            'max_credits_per_session', 'max_session_duration_seconds', 'javascript_injection',
+            'is_enabled', 'require_claim', 'auto_claim_interval_seconds',
+            'max_credits_per_day', 'max_sessions_per_day', 'max_time_per_day_seconds',
+            'require_active_tab', 'require_captcha',
+        ];
+
         foreach ($settings as $key => $value) {
-            if ($value === null) {
+            if (!in_array($key, $validKeys)) {
                 continue;
             }
 
-            // Convert boolean to string
+            if ($value === null) {
+                PluginSettings::deleteSettings(self::PLUGIN_IDENTIFIER, $key);
+                continue;
+            }
+
             if (is_bool($value)) {
                 $value = $value ? '1' : '0';
             } else {
@@ -94,9 +133,9 @@ class AFKHelper
      */
     public static function isEnabled(): bool
     {
-        $enabled = self::getSetting('is_enabled');
+        $settings = self::getSettings();
 
-        return $enabled === '1' || $enabled === 'true' || $enabled === null; // Default to enabled
+        return (bool) ($settings['is_enabled'] ?? true);
     }
 
     /**

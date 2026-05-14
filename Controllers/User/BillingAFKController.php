@@ -17,8 +17,10 @@
 
 namespace App\Addons\billingafk\Controllers\User;
 
+use App\App;
 use App\Helpers\ApiResponse;
 use OpenApi\Attributes as OA;
+use App\Config\ConfigInterface;
 use App\Addons\billingafk\Chat\AFKUserStats;
 use App\Addons\billingafk\Helpers\AFKHelper;
 use App\Addons\billingafk\Chat\AFKDailyUsage;
@@ -52,54 +54,79 @@ class BillingAFKController
         }
 
         $settings = AFKHelper::getSettings();
-        $javascriptInjection = html_entity_decode(
-            $settings['javascript_injection'] ?? '',
-            ENT_QUOTES | ENT_HTML5,
-            'UTF-8'
-        );
-
-        // Get user's current credits balance
         $userCredits = CreditsHelper::getUserCredits($user['id']);
-
-        // Get user AFK stats (like MythicalDash)
         $stats = AFKUserStats::getOrCreate($user['id']);
-        $minutesAfk = $stats ? (int) ($stats['minutes_afk'] ?? 0) : 0;
-        $lastSeenAfk = $stats ? (int) ($stats['last_seen_afk'] ?? 0) : 0;
-
-        // Get daily usage and limits
         $dailyUsage = AFKDailyUsage::getTodayUsage($user['id']);
-        $dailyUsageData = [
-            'credits_earned_today' => $dailyUsage ? (int) $dailyUsage['credits_earned'] : 0,
-            'sessions_today' => $dailyUsage ? (int) $dailyUsage['sessions_count'] : 0,
-            'time_seconds_today' => $dailyUsage ? (int) $dailyUsage['time_seconds'] : 0,
-        ];
 
-        // Get daily limits
-        $dailyLimits = [
-            'max_credits_per_day' => $settings['max_credits_per_day'],
-            'max_sessions_per_day' => $settings['max_sessions_per_day'],
-            'max_time_per_day_seconds' => $settings['max_time_per_day_seconds'],
-        ];
+        $captchaConfig = [];
+        if ($settings['require_captcha'] ?? false) {
+            $config = App::getInstance(true)->getConfig();
+            $provider = $config->getSetting(ConfigInterface::CAPTCHA_PROVIDER, 'turnstile');
+            $siteKey = '';
 
-        // Get credit configuration for frontend
-        $creditsPerMinute = isset($settings['credits_per_minute']) && $settings['credits_per_minute'] > 0
-            ? (float) $settings['credits_per_minute']
-            : null;
-        $minutesPerCredit = isset($settings['minutes_per_credit']) && $settings['minutes_per_credit'] > 0
-            ? (float) $settings['minutes_per_credit']
-            : null;
+            switch ($provider) {
+                case 'turnstile':
+                    $siteKey = $config->getSetting(ConfigInterface::TURNSTILE_KEY_PUB, '');
+                    break;
+                case 'hcaptcha':
+                    $siteKey = $config->getSetting(ConfigInterface::HCAPTCHA_SITE_KEY, '');
+                    break;
+                case 'recaptcha':
+                    $siteKey = $config->getSetting(ConfigInterface::RECAPTCHA_SITE_KEY, '');
+                    break;
+                case 'friendlycaptcha':
+                    $siteKey = $config->getSetting(ConfigInterface::FRIENDLY_CAPTCHA_SITE_KEY, '');
+                    break;
+                case 'reforge':
+                    $siteKey = $config->getSetting(ConfigInterface::REFORGE_CAPTCHA_SITE_KEY, '');
+                    break;
+            }
 
-        return ApiResponse::success([
-            'minutes_afk' => $minutesAfk,
-            'last_seen_afk' => $lastSeenAfk,
-            'javascript_injection' => $javascriptInjection,
+            $captchaConfig = [
+                'provider' => $provider,
+                'enabled' => $config->getSetting(ConfigInterface::TURNSTILE_ENABLED, 'false') === 'true',
+                'theme' => $config->getSetting(ConfigInterface::APP_THEME_DEFAULT, 'dark') === 'dark' ? 'dark' : 'light',
+                'turnstile' => [
+                    'site_key' => $config->getSetting(ConfigInterface::TURNSTILE_KEY_PUB, ''),
+                ],
+                'hcaptcha' => [
+                    'site_key' => $config->getSetting(ConfigInterface::HCAPTCHA_SITE_KEY, ''),
+                ],
+                'recaptcha' => [
+                    'site_key' => $config->getSetting(ConfigInterface::RECAPTCHA_SITE_KEY, ''),
+                    'version' => $config->getSetting(ConfigInterface::RECAPTCHA_VERSION, 'v2'),
+                    'v3_action' => $config->getSetting(ConfigInterface::RECAPTCHA_V3_ACTION, 'submit'),
+                ],
+                'friendlycaptcha' => [
+                    'site_key' => $config->getSetting(ConfigInterface::FRIENDLY_CAPTCHA_SITE_KEY, ''),
+                ],
+                'reforge' => [
+                    'site_key' => $config->getSetting(ConfigInterface::REFORGE_CAPTCHA_SITE_KEY, ''),
+                    'widget_type' => $config->getSetting(ConfigInterface::REFORGE_CAPTCHA_WIDGET_TYPE, 'checkbox'),
+                    'theme' => $config->getSetting(ConfigInterface::REFORGE_CAPTCHA_THEME, 'auto'),
+                    'size' => $config->getSetting(ConfigInterface::REFORGE_CAPTCHA_SIZE, 'normal'),
+                    'lang' => $config->getSetting(ConfigInterface::REFORGE_CAPTCHA_LANG, 'en'),
+                ],
+            ];
+        }
+
+        return ApiResponse::success(array_merge($settings, [
+            'minutes_afk' => (int) ($stats['minutes_afk'] ?? 0),
+            'last_seen_afk' => (int) ($stats['last_seen_afk'] ?? 0),
             'user_credits' => $userCredits,
             'user_credits_formatted' => CurrencyHelper::formatAmount($userCredits),
-            'credits_per_minute' => $creditsPerMinute,
-            'minutes_per_credit' => $minutesPerCredit,
-            'daily_usage' => $dailyUsageData,
-            'daily_limits' => $dailyLimits,
-        ], 'Status retrieved successfully', 200);
+            'daily_usage' => [
+                'credits_earned_today' => $dailyUsage ? (int) $dailyUsage['credits_earned'] : 0,
+                'sessions_today' => $dailyUsage ? (int) $dailyUsage['sessions_count'] : 0,
+                'time_seconds_today' => $dailyUsage ? (int) $dailyUsage['time_seconds'] : 0,
+            ],
+            'daily_limits' => [
+                'max_credits_per_day' => $settings['max_credits_per_day'] ?? null,
+                'max_sessions_per_day' => $settings['max_sessions_per_day'] ?? null,
+                'max_time_per_day_seconds' => $settings['max_time_per_day_seconds'] ?? null,
+            ],
+            'captcha' => $captchaConfig,
+        ]), 'Status retrieved successfully', 200);
     }
 
     #[OA\Post(
@@ -278,10 +305,10 @@ class BillingAFKController
                         'credits' => $creditsToAward,
                     ]);
                 } catch (\PDOException $e) {
-                    \App\App::getInstance(true)->getLogger()->error('Failed to update AFK stats: ' . $e->getMessage());
+                    App::getInstance(true)->getLogger()->error('Failed to update AFK stats: ' . $e->getMessage());
                 }
             } else {
-                \App\App::getInstance(true)->getLogger()->error('Failed to add AFK credits for user: ' . $user['id']);
+                App::getInstance(true)->getLogger()->error('Failed to add AFK credits for user: ' . $user['id']);
             }
         } else {
             // Still update total time even if no credits awarded
@@ -294,7 +321,7 @@ class BillingAFKController
                 );
                 $stmt->execute(['user_id' => $user['id']]);
             } catch (\PDOException $e) {
-                \App\App::getInstance(true)->getLogger()->error('Failed to update AFK time: ' . $e->getMessage());
+                App::getInstance(true)->getLogger()->error('Failed to update AFK time: ' . $e->getMessage());
             }
         }
 
