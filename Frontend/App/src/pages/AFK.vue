@@ -13,7 +13,7 @@ import {
   AlertCircle,
   Sparkles,
   TrendingUp,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import Captcha from "@/components/Captcha.vue";
 import { useAFKAPI } from "@/composables/useAFKAPI";
 import { useToast } from "vue-toastification";

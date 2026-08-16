@@ -16,7 +16,7 @@ import {
   ChevronRight,
   Clock,
   DollarSign,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import {
   useAFKAdminAPI,
   type AFKSettings,
