@@ -122,7 +122,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git diff --quiet -- conf.yml; then
-            echo "conf.yml already matches remote — nothing to commit"
+            echo "conf.yml already matches remote - nothing to commit"
             exit 0
           fi
           git add conf.yml

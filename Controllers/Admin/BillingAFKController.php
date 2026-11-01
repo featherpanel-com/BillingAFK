@@ -62,9 +62,16 @@ class BillingAFKController
         }
 
         try {
+            $wasEnabled = AFKHelper::isEnabled();
             AFKHelper::updateSettings($data);
+            $settings = AFKHelper::getSettings();
 
-            return ApiResponse::success(AFKHelper::getSettings(), 'Settings updated successfully', 200);
+            // When AFK is turned off, kill any in-flight sessions so /work cannot keep paying.
+            if ($wasEnabled && !($settings['is_enabled'] ?? false)) {
+                AFKUserStats::stopAllActiveSessions();
+            }
+
+            return ApiResponse::success($settings, 'Settings updated successfully', 200);
         } catch (\Exception $e) {
             return ApiResponse::error('Failed to update settings: ' . $e->getMessage(), 'UPDATE_FAILED', 500);
         }

@@ -20,12 +20,20 @@ import { useToast } from "vue-toastification";
 import axios from "axios";
 
 const toast = useToast();
-const { loading, error, getStatus } = useAFKAPI();
+const {
+  loading,
+  error,
+  getStatus,
+  startAFK: startAFKApi,
+  stopAFK: stopAFKApi,
+} = useAFKAPI();
 
 // AFK State (like MythicalDash)
 const afkStatus = ref<{
   minutes_afk?: number;
   last_seen_afk?: number;
+  session_active?: boolean;
+  session_started_at?: number;
   javascript_injection?: string;
   user_credits?: number;
   user_credits_formatted?: string;
@@ -82,8 +90,8 @@ const expectedCreditsPerMinute = computed(() => {
     return 1.0 / afkStatus.value.minutes_per_credit;
   }
 
-  // Default: 1 credit per minute
-  return 1;
+  // Rates unset/zero — no silent default award
+  return 0;
 });
 
 // Format time helper
@@ -140,7 +148,7 @@ const handleVisibilityChange = () => {
 };
 
 // Load AFK status
-const loadStatus = async () => {
+const loadStatus = async (resumeSession = false) => {
   try {
     const status = await getStatus();
     afkStatus.value = status;
@@ -153,6 +161,12 @@ const loadStatus = async () => {
     // Update total AFK time
     if (status.minutes_afk !== undefined) {
       totalAFKTime.value = status.minutes_afk;
+    }
+
+    // Resume an existing server session after refresh
+    if (resumeSession && status.session_active && !isActive.value) {
+      isActive.value = true;
+      startTimer();
     }
 
     // Inject JavaScript if provided
@@ -182,22 +196,25 @@ const loadStatus = async () => {
       }
     }
   } catch (err) {
-    toast.error(
-      err instanceof Error ? err.message : "Failed to load AFK status"
-    );
+    const message =
+      err instanceof Error ? err.message : "Failed to load AFK status";
+    toast.error(message);
+    if (message.toLowerCase().includes("disabled")) {
+      stopTimer();
+      isActive.value = false;
+    }
   }
 };
 
-// Toggle AFK mode (like MythicalDash - no backend session, just local state)
+// Start AFK via server session (captcha validated server-side when required)
 const startAFK = async () => {
-  if (afkStatus.value?.require_captcha && !captchaVerified.value) {
+  const needsCaptcha =
+    !!afkStatus.value?.require_captcha && !!afkStatus.value?.captcha?.enabled;
+
+  if (needsCaptcha && !captchaVerified.value) {
     if (captchaWidget.value) {
       try {
         await captchaWidget.value.execute();
-        // If it's synchronous (like some providers), we might get the token immediately.
-        // If not, the verify callback will trigger startAFK again or we can wait.
-        // For simplicity, we'll let the verify callback handle the state change if needed,
-        // or just toast a message.
         toast.info("Verifying security...");
         return;
       } catch (err) {
@@ -208,15 +225,27 @@ const startAFK = async () => {
     toast.error("Please complete the captcha first");
     return;
   }
-  isActive.value = true;
-  seconds.value = 0;
-  sessionCoins.value = 0;
-  currentSessionTime.value = 0;
-  startTimer();
-  toast.success("AFK Mode started!");
+
+  try {
+    await startAFKApi(needsCaptcha ? captchaToken.value : null);
+    isActive.value = true;
+    seconds.value = 0;
+    sessionCoins.value = 0;
+    currentSessionTime.value = 0;
+    startTimer();
+    toast.success("AFK Mode started!");
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : "Failed to start AFK");
+  }
 };
 
-const stopAFK = () => {
+const stopAFK = async () => {
+  try {
+    await stopAFKApi();
+  } catch (err) {
+    console.error("Failed to stop AFK session:", err);
+  }
+
   isActive.value = false;
   stopTimer();
   // Reset captcha if enabled
@@ -324,7 +353,22 @@ const updateAFKStats = async () => {
   } catch (err) {
     console.error("Failed to update AFK stats:", err);
     if (axios.isAxiosError(err)) {
+      const code = err.response?.data?.error_code || "";
       const errorMsg = err.response?.data?.message || err.message;
+
+      // Session ended / AFK disabled — stop local timer
+      if (
+        code === "AFK_DISABLED" ||
+        code === "NO_ACTIVE_SESSION" ||
+        code === "SESSION_DURATION_EXCEEDED" ||
+        errorMsg.toLowerCase().includes("disabled")
+      ) {
+        stopTimer();
+        isActive.value = false;
+        toast.error(errorMsg);
+        return;
+      }
+
       // Don't show error for rate limiting - it's expected
       if (!errorMsg.includes("RATE_LIMIT") && !errorMsg.includes("wait")) {
         toast.error(`Failed to update AFK stats: ${errorMsg}`);
@@ -346,7 +390,7 @@ const stopTimer = () => {
 };
 
 onMounted(() => {
-  loadStatus();
+  loadStatus(true);
 });
 
 onUnmounted(() => {
@@ -370,9 +414,7 @@ onUnmounted(() => {
           </div>
         </div>
         <div>
-          <h1
-            class="text-5xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent"
-          >
+          <h1 class="text-5xl font-bold text-primary">
             AFK Rewards
           </h1>
           <p class="text-lg text-muted-foreground mt-2">
@@ -507,7 +549,7 @@ onUnmounted(() => {
 
           <div v-else-if="afkStatus" class="space-y-6">
             <!-- Status Badge and Toggle -->
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between flex-wrap gap-4">
               <div class="flex items-center gap-3">
                 <Badge
                   :variant="isActive ? 'default' : 'secondary'"
@@ -690,22 +732,6 @@ onUnmounted(() => {
   background-color: rgba(31, 41, 55, 0.5);
   border-radius: 0.75rem;
   padding: 1.5rem 0.75rem;
-  position: relative;
-  overflow: hidden;
-  border: 2px solid rgba(99, 102, 241, 0.2);
-}
-
-.timer-unit::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(
-    to right,
-    rgba(99, 102, 241, 0.4),
-    rgba(139, 92, 246, 0.4)
-  );
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 </style>

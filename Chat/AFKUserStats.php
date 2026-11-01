@@ -161,6 +161,98 @@ class AFKUserStats
     }
 
     /**
+     * Mark the user as having an authorized AFK session.
+     */
+    public static function startActiveSession(int $userId): bool
+    {
+        if (!self::assertUserExists($userId)) {
+            return false;
+        }
+
+        if (!self::getOrCreate($userId)) {
+            return false;
+        }
+
+        $pdo = Database::getPdoConnection();
+
+        try {
+            $stmt = $pdo->prepare(
+                'UPDATE ' . self::$table . ' SET 
+                    session_active = 1,
+                    session_started_at = :started_at
+                WHERE user_id = :user_id'
+            );
+            $stmt->execute([
+                'user_id' => $userId,
+                'started_at' => time(),
+            ]);
+
+            return true;
+        } catch (\PDOException $e) {
+            App::getInstance(true)->getLogger()->error('Failed to start AFK session: ' . $e->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
+     * Clear the user's authorized AFK session.
+     */
+    public static function stopActiveSession(int $userId): bool
+    {
+        if (!self::assertUserExists($userId)) {
+            return false;
+        }
+
+        $pdo = Database::getPdoConnection();
+
+        try {
+            $stmt = $pdo->prepare(
+                'UPDATE ' . self::$table . ' SET 
+                    session_active = 0,
+                    session_started_at = 0
+                WHERE user_id = :user_id'
+            );
+            $stmt->execute(['user_id' => $userId]);
+
+            return true;
+        } catch (\PDOException $e) {
+            App::getInstance(true)->getLogger()->error('Failed to stop AFK session: ' . $e->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
+     * Whether the user currently has an authorized AFK session.
+     */
+    public static function hasActiveSession(int $userId): bool
+    {
+        $stats = self::getOrCreate($userId);
+        if (!$stats) {
+            return false;
+        }
+
+        return (int) ($stats['session_active'] ?? 0) === 1;
+    }
+
+    /**
+     * Stop every active AFK session (used when AFK rewards are disabled).
+     */
+    public static function stopAllActiveSessions(): void
+    {
+        $pdo = Database::getPdoConnection();
+
+        try {
+            $pdo->exec(
+                'UPDATE ' . self::$table . ' SET session_active = 0, session_started_at = 0 WHERE session_active = 1'
+            );
+        } catch (\PDOException $e) {
+            App::getInstance(true)->getLogger()->error('Failed to stop all AFK sessions: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Update stats after claiming rewards.
      */
     public static function updateStats(int $userId, int $timeSeconds, int $creditsEarned): bool

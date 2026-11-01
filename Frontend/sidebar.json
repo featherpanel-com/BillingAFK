@@ -9,7 +9,12 @@
       "component": "/billingafk/dist/afk.html",
       "description": "Earn credits by staying AFK",
       "category": "client",
-      "group": "Earn Credits"
+      "group": "Earn Credits",
+      "enabled": {
+        "type": "plugin_setting",
+        "key": "is_enabled",
+        "equals": "1"
+      }
     }
   },
   "admin": {

@@ -5,11 +5,15 @@ import type { AxiosError } from "axios";
 export interface AFKStatus {
   minutes_afk?: number;
   last_seen_afk?: number;
+  session_active?: boolean;
+  session_started_at?: number;
   javascript_injection?: string;
   user_credits?: number;
   user_credits_formatted?: string;
   credits_per_minute?: number | null;
   minutes_per_credit?: number | null;
+  require_captcha?: boolean;
+  require_active_tab?: boolean;
   daily_usage?: {
     credits_earned_today: number;
     sessions_today: number;
@@ -19,6 +23,11 @@ export interface AFKStatus {
     max_credits_per_day: number | null;
     max_sessions_per_day: number | null;
     max_time_per_day_seconds: number | null;
+  };
+  captcha?: {
+    provider: string;
+    enabled: boolean;
+    [key: string]: unknown;
   };
 }
 
@@ -79,13 +88,19 @@ export function useAFKAPI() {
     }
   };
 
-  // Start AFK
-  const startAFK = async (): Promise<void> => {
+  // Start AFK (server session + optional captcha token)
+  const startAFK = async (captchaToken?: string | null): Promise<void> => {
     loading.value = true;
     error.value = null;
 
     try {
-      const response = await axios.post("/api/user/billingafk/start");
+      const payload: Record<string, string> = {};
+      if (captchaToken) {
+        payload.turnstile_token = captchaToken;
+        payload.captcha_token = captchaToken;
+      }
+
+      const response = await axios.post("/api/user/billingafk/start", payload);
       if (!response.data || !response.data.success) {
         throw new Error(response.data?.message || "Failed to start AFK mode");
       }

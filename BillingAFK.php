@@ -34,15 +34,18 @@ class BillingAFK implements AppPlugin
     {
         // Plugin installation logic
         // Create tables, directories, etc.
-        AFKHelper::setSetting('require_active_tab', 'true');
+        AFKHelper::setSetting('require_active_tab', '1');
+        if (AFKHelper::getSetting('is_enabled') === null) {
+            AFKHelper::setSetting('is_enabled', '1');
+        }
     }
 
     public static function pluginUpdate(?string $oldVersion, ?string $newVersion): void
     {
-        // Plugin update logic
-        // Migrate data, update configurations, etc.
-        // $oldVersion contains the previous version (e.g., '1.0.0')
-        // $newVersion contains the new version being installed (e.g., '1.0.1')
+        // Ensure sidebar visibility has a concrete is_enabled value (null hides the page).
+        if (AFKHelper::getSetting('is_enabled') === null) {
+            AFKHelper::setSetting('is_enabled', '1');
+        }
     }
 
     public static function pluginUninstall(): void

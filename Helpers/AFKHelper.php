@@ -145,14 +145,14 @@ class AFKHelper
     {
         $settings = self::getSettings();
 
-        // Use credits_per_minute if set, otherwise use minutes_per_credit
+        // Use credits_per_minute if set, otherwise use minutes_per_credit.
+        // Explicit zero rates must not fall through to a silent default award.
         if ($settings['credits_per_minute'] > 0) {
             $credits = ($timeElapsedSeconds / 60) * $settings['credits_per_minute'];
         } elseif ($settings['minutes_per_credit'] > 0) {
             $credits = ($timeElapsedSeconds / 60) / $settings['minutes_per_credit'];
         } else {
-            // Default: 1 credit per minute
-            $credits = $timeElapsedSeconds / 60;
+            $credits = 0;
         }
 
         $credits = (int) floor($credits);

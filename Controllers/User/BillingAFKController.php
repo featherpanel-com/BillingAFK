@@ -19,8 +19,10 @@ namespace App\Addons\billingafk\Controllers\User;
 
 use App\App;
 use App\Helpers\ApiResponse;
+use App\Helpers\CaptchaHelper;
 use OpenApi\Attributes as OA;
 use App\Config\ConfigInterface;
+use App\CloudFlare\CloudFlareRealIP;
 use App\Addons\billingafk\Chat\AFKUserStats;
 use App\Addons\billingafk\Helpers\AFKHelper;
 use App\Addons\billingafk\Chat\AFKDailyUsage;
@@ -113,6 +115,8 @@ class BillingAFKController
         return ApiResponse::success(array_merge($settings, [
             'minutes_afk' => (int) ($stats['minutes_afk'] ?? 0),
             'last_seen_afk' => (int) ($stats['last_seen_afk'] ?? 0),
+            'session_active' => (int) ($stats['session_active'] ?? 0) === 1,
+            'session_started_at' => (int) ($stats['session_started_at'] ?? 0),
             'user_credits' => $userCredits,
             'user_credits_formatted' => CurrencyHelper::formatAmount($userCredits),
             'daily_usage' => [
@@ -142,8 +146,50 @@ class BillingAFKController
     )]
     public function startAFK(Request $request): Response
     {
-        // No-op: Sessions are not used, just return success (like MythicalDash)
-        return ApiResponse::success([], 'AFK mode can be started from frontend', 200);
+        $user = $request->attributes->get('user') ?? $request->get('user');
+        if (!$user || !isset($user['id'])) {
+            return ApiResponse::error('User not authenticated', 'UNAUTHORIZED', 401);
+        }
+
+        if (!AFKHelper::isEnabled()) {
+            return ApiResponse::error('AFK rewards are currently disabled', 'AFK_DISABLED', 403);
+        }
+
+        $settings = AFKHelper::getSettings();
+        $limitCheck = AFKDailyUsage::checkDailyLimits($user['id'], $settings);
+        if (!$limitCheck['allowed']) {
+            return ApiResponse::error($limitCheck['message'], $limitCheck['reason'], 429);
+        }
+
+        $data = json_decode($request->getContent() ?: '{}', true, 32);
+        if (!is_array($data)) {
+            $data = [];
+        }
+
+        $captchaError = $this->validateCaptchaIfRequired($settings, $data);
+        if ($captchaError !== null) {
+            return $captchaError;
+        }
+
+        if (AFKUserStats::hasActiveSession($user['id'])) {
+            return ApiResponse::success([
+                'session_active' => true,
+                'session_started_at' => (int) (AFKUserStats::getOrCreate($user['id'])['session_started_at'] ?? time()),
+            ], 'AFK session already active', 200);
+        }
+
+        if (!AFKUserStats::startActiveSession($user['id'])) {
+            return ApiResponse::error('Failed to start AFK session', 'START_FAILED', 500);
+        }
+
+        AFKDailyUsage::updateUsage($user['id'], 0, 0, true);
+
+        $stats = AFKUserStats::getOrCreate($user['id']);
+
+        return ApiResponse::success([
+            'session_active' => true,
+            'session_started_at' => (int) ($stats['session_started_at'] ?? time()),
+        ], 'AFK session started successfully', 200);
     }
 
     #[OA\Post(
@@ -159,8 +205,16 @@ class BillingAFKController
     )]
     public function stopAFK(Request $request): Response
     {
-        // No-op: Sessions are not used, just return success (like MythicalDash)
-        return ApiResponse::success([], 'AFK mode can be stopped from frontend', 200);
+        $user = $request->attributes->get('user') ?? $request->get('user');
+        if (!$user || !isset($user['id'])) {
+            return ApiResponse::error('User not authenticated', 'UNAUTHORIZED', 401);
+        }
+
+        AFKUserStats::stopActiveSession($user['id']);
+
+        return ApiResponse::success([
+            'session_active' => false,
+        ], 'AFK session stopped successfully', 200);
     }
 
     #[OA\Post(
@@ -198,11 +252,37 @@ class BillingAFKController
         }
 
         if (!AFKHelper::isEnabled()) {
+            AFKUserStats::stopActiveSession($user['id']);
+
             return ApiResponse::error('AFK rewards are currently disabled', 'AFK_DISABLED', 403);
+        }
+
+        if (!AFKUserStats::hasActiveSession($user['id'])) {
+            return ApiResponse::error(
+                'No active AFK session. Start AFK from the panel before earning credits.',
+                'NO_ACTIVE_SESSION',
+                403
+            );
         }
 
         // Get settings
         $settings = AFKHelper::getSettings();
+
+        $stats = AFKUserStats::getOrCreate($user['id']);
+        $sessionStartedAt = (int) ($stats['session_started_at'] ?? 0);
+        if (
+            $settings['max_session_duration_seconds'] !== null
+            && $sessionStartedAt > 0
+            && (time() - $sessionStartedAt) > (int) $settings['max_session_duration_seconds']
+        ) {
+            AFKUserStats::stopActiveSession($user['id']);
+
+            return ApiResponse::error(
+                'AFK session duration limit reached. Please start a new session.',
+                'SESSION_DURATION_EXCEEDED',
+                429
+            );
+        }
 
         // Abuse prevention: Increment AFK time with rate limiting (atomic operation)
         // This prevents spam by checking and updating in a single transaction
@@ -255,9 +335,9 @@ class BillingAFKController
                 $creditsToAward = (int) floor($creditsPerMinute);
             }
         }
-        // Default: 1 credit per minute
+        // Explicit zero / unset rates: do not silently award 1 credit per minute
         else {
-            $creditsToAward = 1;
+            $creditsToAward = 0;
         }
 
         // Check daily limits before awarding credits
@@ -329,6 +409,7 @@ class BillingAFKController
             'credits_awarded' => $creditsToAward,
             'total_credits' => $newTotalCredits,
             'total_afk_time' => $newMinutesAfk,
+            'session_active' => true,
         ], 'AFK stats updated', 200);
     }
 
@@ -367,5 +448,38 @@ class BillingAFKController
             'sessions_count' => (int) $stats['sessions_count'],
             'last_session_at' => $stats['last_session_at'],
         ], 'Statistics retrieved successfully', 200);
+    }
+
+    /**
+     * Validate captcha when AFK require_captcha is enabled and global captcha is on.
+     */
+    private function validateCaptchaIfRequired(array $settings, array $data): ?Response
+    {
+        if (!($settings['require_captcha'] ?? false)) {
+            return null;
+        }
+
+        $config = App::getInstance(true)->getConfig();
+        if ($config->getSetting(ConfigInterface::TURNSTILE_ENABLED, 'false') !== 'true') {
+            return null;
+        }
+
+        $token = '';
+        foreach (['turnstile_token', 'captcha_token', 'captcha'] as $key) {
+            if (isset($data[$key]) && is_scalar($data[$key]) && trim((string) $data[$key]) !== '') {
+                $token = trim((string) $data[$key]);
+                break;
+            }
+        }
+
+        if ($token === '') {
+            return ApiResponse::error('Captcha verification is required to start AFK', 'CAPTCHA_REQUIRED', 400);
+        }
+
+        if (!CaptchaHelper::validate($token, CloudFlareRealIP::getRealIP())) {
+            return ApiResponse::error('Captcha verification failed', 'CAPTCHA_INVALID', 400);
+        }
+
+        return null;
     }
 }
